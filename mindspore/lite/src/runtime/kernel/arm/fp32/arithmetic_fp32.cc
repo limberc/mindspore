@@ -20,7 +20,7 @@
 #include "src/kernel_registry.h"
 #include "src/runtime/kernel/arm/int8/add_int8.h"
 #include "src/runtime/runtime_api.h"
-#include "src/ops/populate/arithmetic_populate.h"
+#include "src/ops/arithmetic.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::KernelRegistrar;
@@ -29,7 +29,6 @@ using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_Eltwise;
 
 namespace mindspore::kernel {
-
 ArithmeticCPUKernel::~ArithmeticCPUKernel() {
   FreeTmpPtr();
   return;
@@ -72,9 +71,10 @@ int ArithmeticCPUKernel::InitBroadCastCase() {
     if (input0_ptr_ == nullptr) {
       return RET_ERROR;
     }
-    TileOneDimension(reinterpret_cast<float *>(in_tensors_[0]->data_c()), reinterpret_cast<float *>(input0_ptr_), 0,
-                     arithmeticParameter_->ndim_, arithmeticParameter_->in_shape0_, arithmeticParameter_->in_strides0_,
-                     arithmeticParameter_->out_strides_, arithmeticParameter_->multiples0_);
+    TileOneDimensionFp32(reinterpret_cast<float *>(in_tensors_[0]->data_c()), reinterpret_cast<float *>(input0_ptr_), 0,
+                         arithmeticParameter_->ndim_, arithmeticParameter_->in_shape0_,
+                         arithmeticParameter_->in_strides0_, arithmeticParameter_->out_strides_,
+                         arithmeticParameter_->multiples0_);
     arithmeticParameter_->broadcasting_ = false;
     input0_broadcast_ = true;
   }
@@ -85,45 +85,12 @@ int ArithmeticCPUKernel::InitBroadCastCase() {
       FreeTmpPtr();
       return RET_ERROR;
     }
-    TileOneDimension(reinterpret_cast<float *>(in_tensors_[1]->data_c()), reinterpret_cast<float *>(input1_ptr_), 0,
-                     arithmeticParameter_->ndim_, arithmeticParameter_->in_shape1_, arithmeticParameter_->in_strides1_,
-                     arithmeticParameter_->out_strides_, arithmeticParameter_->multiples1_);
+    TileOneDimensionFp32(reinterpret_cast<float *>(in_tensors_[1]->data_c()), reinterpret_cast<float *>(input1_ptr_), 0,
+                         arithmeticParameter_->ndim_, arithmeticParameter_->in_shape1_,
+                         arithmeticParameter_->in_strides1_, arithmeticParameter_->out_strides_,
+                         arithmeticParameter_->multiples1_);
     arithmeticParameter_->broadcasting_ = false;
     input1_broadcast_ = true;
-  }
-  return RET_OK;
-}
-
-int ArithmeticCPUKernel::PreProcess() {
-  if (!InferShapeDone()) {
-    (const_cast<mindspore::lite::PrimitiveC *>(primitive_))->set_infer_flag(true);
-    auto ret = (const_cast<mindspore::lite::PrimitiveC *>(primitive_))->InferShape(in_tensors_, out_tensors_);
-    if (ret != 0) {
-      (const_cast<mindspore::lite::PrimitiveC *>(primitive_))->set_infer_flag(false);
-      MS_LOG(ERROR) << "InferShape fail!";
-      return ret;
-    }
-    if (op_parameter_ != nullptr) {
-      free(op_parameter_);
-      op_parameter_ = nullptr;
-    }
-    op_parameter_ = PopulateArithmetic(primitive_);
-    if (op_parameter_ == nullptr) {
-      MS_LOG(ERROR) << "Malloc parameter failed";
-      return RET_ERROR;
-    }
-    arithmeticParameter_ = reinterpret_cast<ArithmeticParameter *>(op_parameter_);
-    ret = ReSize();
-    if (ret != 0) {
-      MS_LOG(ERROR) << "ReSize fail!ret: " << ret;
-      return ret;
-    }
-  }
-
-  auto outputs = this->out_tensors();
-  for (auto *output : outputs) {
-    MS_ASSERT(output != nullptr);
-    output->MallocData();
   }
   return RET_OK;
 }
@@ -191,15 +158,18 @@ void ArithmeticCPUKernel::InitRunFunction() {
     case PrimitiveType_LogicalAnd:
       arithmetic_run_ = ElementLogicalAnd;
       arithmetic_run_int_ = ElementLogicalAndInt;
+      arithmetic_run_bool_ = ElementLogicalAndBool;
       break;
     case PrimitiveType_LogicalOr:
       arithmetic_run_ = ElementLogicalOr;
       break;
     case PrimitiveType_Maximum:
       arithmetic_run_ = ElementMaximum;
+      arithmetic_run_int_ = ElementMaximumInt;
       break;
     case PrimitiveType_Minimum:
       arithmetic_run_ = ElementMinimum;
+      arithmetic_run_int_ = ElementMinimumInt;
       break;
     case PrimitiveType_FloorDiv:
       arithmetic_run_ = ElementFloorDiv;
@@ -285,6 +255,7 @@ void ArithmeticCPUKernel::InitOptRunFunction() {
           default:
             arithmeticParameter_->broadcasting_ = false;
             arithmetic_opt_run_ = ElementOptSub;
+            arithmetic_opt_run_int_ = ElementOptSubInt;
             break;
         }
         break;
@@ -329,6 +300,8 @@ void ArithmeticCPUKernel::InitParam() {
   arithmeticParameter_->ndim_ = arithmetic_lite_primitive->NDims();
   if (in_tensors_[0]->data_type() == kNumberTypeFloat32 || in_tensors_[0]->data_type() == kNumberTypeFloat16) {
     data_type_ = kDataTypeFloat;
+  } else if (in_tensors_[0]->data_type() == kNumberTypeBool) {
+    data_type_ = KDataTypeBool;
   } else {
     data_type_ = kDataTypeInt;
   }
@@ -453,6 +426,10 @@ int ArithmeticCPUKernel::DoArithmetic(int task_id) {
     error_code = arithmetic_run_(reinterpret_cast<float *>(input0_ptr_) + stride * task_id,
                                  reinterpret_cast<float *>(input1_ptr_) + stride * task_id,
                                  reinterpret_cast<float *>(out_tensors_[0]->data_c()) + stride * task_id, count);
+  } else if (data_type_ == KDataTypeBool) {
+    error_code = arithmetic_run_bool_(reinterpret_cast<bool *>(input0_ptr_) + stride * task_id,
+                                      reinterpret_cast<bool *>(input1_ptr_) + stride * task_id,
+                                      reinterpret_cast<bool *>(out_tensors_[0]->data_c()) + stride * task_id, count);
   } else {
     error_code = arithmetic_run_int_(reinterpret_cast<int *>(input0_ptr_) + stride * task_id,
                                      reinterpret_cast<int *>(input1_ptr_) + stride * task_id,
@@ -520,48 +497,29 @@ int ArithmeticCPUKernel::Run() {
   }
   return RET_OK;
 }
-
-kernel::LiteKernel *CpuArithmeticFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                   const std::vector<lite::Tensor *> &outputs, OpParameter *parameter,
-                                                   const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                   const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(parameter != nullptr);
-  auto kernel = new (std::nothrow) ArithmeticCPUKernel(parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "Create kernel failed, name: " << parameter->name_;
-    free(parameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << parameter->name_
-                  << ", type: " << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(parameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Mul, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Mul, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Add, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Add, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Sub, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Sub, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Div, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_RealDiv, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Mod, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Mod, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_LogicalAnd, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeBool, PrimitiveType_LogicalAnd, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_LogicalOr, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Maximum, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Minimum, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_FloorDiv, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_FloorMod, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_FloorDiv, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_FloorMod, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_SquaredDifference, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Eltwise, CpuArithmeticFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Div, CpuArithmeticFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Mul, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Mul, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Add, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Add, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Sub, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Sub, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Div, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_RealDiv, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Mod, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Mod, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_LogicalAnd, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeBool, PrimitiveType_LogicalAnd, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_LogicalAnd, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_LogicalOr, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Maximum, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Minimum, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Maximum, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Minimum, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_FloorDiv, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_FloorMod, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_FloorDiv, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_FloorMod, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_SquaredDifference, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Eltwise, LiteKernelCreator<ArithmeticCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Div, LiteKernelCreator<ArithmeticCPUKernel>)
 }  // namespace mindspore::kernel

@@ -15,7 +15,7 @@
  */
 #include "minddata/dataset/kernels/image/lite_cv/lite_mat.h"
 
-#include <limits.h>
+#include <limits>
 #include <algorithm>
 #include <cmath>
 #ifdef ENABLE_ANDROID
@@ -252,7 +252,7 @@ void LiteMat::Release() {
 
 void *LiteMat::AlignMalloc(unsigned int size) {
   unsigned int length = sizeof(void *) + ALIGN - 1;
-  if (size > INT_MAX - length) {
+  if (size > std::numeric_limits<uint32_t>::max() - length) {
     return nullptr;
   }
   void *p_raw = reinterpret_cast<void *>(malloc(size + length));
@@ -323,6 +323,10 @@ inline void SubtractImpl(const uint32_t *src0, const uint32_t *src1, uint32_t *d
 }
 
 bool Subtract(const LiteMat &src_a, const LiteMat &src_b, LiteMat *dst) {
+  if (dst == NULL) {
+    return false;
+  }
+
   if (src_a.width_ != src_b.width_ || src_a.height_ != src_b.height_ || src_a.channel_ != src_b.channel_) {
     return false;
   }
@@ -479,6 +483,10 @@ inline void DivideImpl(const uint32_t *src0, const uint32_t *src1, uint32_t *dst
 }
 
 bool Divide(const LiteMat &src_a, const LiteMat &src_b, LiteMat *dst) {
+  if (dst == NULL) {
+    return false;
+  }
+
   if (src_a.width_ != src_b.width_ || src_a.height_ != src_b.height_ || src_a.channel_ != src_b.channel_) {
     return false;
   }
@@ -576,6 +584,10 @@ inline void MultiplyImpl(const uint32_t *src0, const uint32_t *src1, uint32_t *d
 }
 
 bool Multiply(const LiteMat &src_a, const LiteMat &src_b, LiteMat *dst) {
+  if (dst == NULL) {
+    return false;
+  }
+
   if (src_a.width_ != src_b.width_ || src_a.height_ != src_b.height_ || src_a.channel_ != src_b.channel_) {
     return false;
   }

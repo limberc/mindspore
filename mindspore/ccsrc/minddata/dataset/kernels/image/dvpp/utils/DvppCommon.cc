@@ -15,7 +15,6 @@
 
 #include <iostream>
 #include <memory>
-
 #include "mindspore/core/utils/log_adapter.h"
 #include "DvppCommon.h"
 #include "CommonDataType.h"
@@ -25,9 +24,9 @@ static auto g_picDescDeleter = [](acldvppPicDesc *picDesc) { acldvppDestroyPicDe
 static auto g_roiConfigDeleter = [](acldvppRoiConfig *p) { acldvppDestroyRoiConfig(p); };
 static auto g_jpegeConfigDeleter = [](acldvppJpegeConfig *p) { acldvppDestroyJpegeConfig(p); };
 
-DvppCommon::DvppCommon(aclrtStream dvppStream) { dvppStream_ = dvppStream; }
+DvppCommon::DvppCommon(aclrtStream dvppStream) : dvppStream_(dvppStream) {}
 
-DvppCommon::DvppCommon(const VdecConfig &vdecConfig) { vdecConfig_ = vdecConfig; }
+DvppCommon::DvppCommon(const VdecConfig &vdecConfig) : vdecConfig_(vdecConfig) {}
 
 /*
  * @description: Create a channel for processing image data,
@@ -984,12 +983,6 @@ APP_ERROR DvppCommon::CombineJpegdProcess(const RawData &imageInfo, acldvppPixel
  * @return: APP_ERR_OK if success, other values if failure
  */
 APP_ERROR DvppCommon::TransferImageH2D(const RawData &imageInfo, const std::shared_ptr<DvppDataInfo> &jpegInput) {
-  // Check image buffer size validity
-  if (imageInfo.lenOfByte <= 0) {
-    MS_LOG(ERROR) << "The input buffer size on host should not be empty.";
-    return APP_ERR_COMM_INVALID_PARAM;
-  }
-
   uint8_t *inDevBuff = nullptr;
   APP_ERROR ret = acldvppMalloc((void **)&inDevBuff, imageInfo.lenOfByte);
   if (ret != APP_ERR_OK) {

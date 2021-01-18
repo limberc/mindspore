@@ -133,7 +133,7 @@ Status BatchOp::operator()() {
     RETURN_IF_NOT_OK(GetBatchSize(&cur_batch_size, CBatchInfo(epoch_num, batch_num, cnt - epoch_num)));
     RETURN_IF_NOT_OK(child_iterator_->FetchNextTensorRow(&new_row));
 
-#if !defined(_WIN32) && !defined(_WIN64)
+#if !defined(_WIN32) && !defined(_WIN64) && ENABLE_PYTHON
     if ((num_workers_ > 1 || batch_map_func_) && GetMemoryUsage() > MAX_MEMORY_USAGE_THRESHOLD) {
       MS_LOG(WARNING) << "Memory consumption is more than " << MAX_MEMORY_USAGE_THRESHOLD * 100 << "%, "
                       << "which may cause oom error. Please reduce num_parallel_workers size / "
@@ -389,8 +389,8 @@ Status BatchOp::InvokeBatchMapFunc(TensorTable *input, TensorTable *output, CBat
         TensorRow output_batch;
         // If user returns a type that is neither a list nor an array, issue a error msg.
         if (py::isinstance<py::array>(ret_tuple[i])) {
-          MS_LOG(WARNING) << "column: " << out_col_names_[i]
-                          << " returned by per_batch_map is a np.array. Please use list instead.";
+          MS_LOG(INFO) << "column: " << out_col_names_[i]
+                       << " returned by per_batch_map is a np.array. Please use list instead.";
         } else if (!py::isinstance<py::list>(ret_tuple[i])) {
           MS_LOG(ERROR) << "column: " << out_col_names_[i]
                         << " returned by per_batch_map is not a list, this could lead to conversion failure.";
@@ -498,13 +498,13 @@ Status BatchOp::UnpackPadInfo(const PadInfo &pad_info,
 }
 
 // Visitor accept method for NodePass
-Status BatchOp::Accept(NodePass *p, bool *modified) {
+Status BatchOp::Accept(NodePass *p, bool *const modified) {
   // Downcast shared pointer then call visitor
   return p->RunOnNode(shared_from_base<BatchOp>(), modified);
 }
 
 // Visitor pre-accept method for NodePass
-Status BatchOp::PreAccept(NodePass *p, bool *modified) {
+Status BatchOp::PreAccept(NodePass *p, bool *const modified) {
   // Downcast shared pointer then call visitor
   return p->PreRunOnNode(shared_from_base<BatchOp>(), modified);
 }

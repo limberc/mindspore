@@ -18,8 +18,8 @@
 #include <string>
 #include <vector>
 #include <string_view>
-#include <unordered_map>
 #include <regex>
+#include <unordered_map>
 #include "src/common/log_adapter.h"
 #include "schema/inner/model_generated.h"
 
@@ -30,7 +30,7 @@ static const std::unordered_map<int, mindspore::TypeId> TF_TYPE_MAP = {
   {tensorflow::DT_UINT8, mindspore::kNumberTypeUInt8},
   {tensorflow::DT_INT16, mindspore::kNumberTypeInt16},
   {tensorflow::DT_UINT16, mindspore::kNumberTypeUInt16},
-  {tensorflow::DT_INT32, mindspore::kNumberTypeInt},
+  {tensorflow::DT_INT32, mindspore::kNumberTypeInt32},
   {tensorflow::DT_INT64, mindspore::kNumberTypeInt64},
   {tensorflow::DT_HALF, mindspore::kNumberTypeFloat16},
   {tensorflow::DT_FLOAT, mindspore::kNumberTypeFloat32},
@@ -85,7 +85,6 @@ schema::Format TensorFlowUtils::ParseNodeFormat(const tensorflow::NodeDef &node_
 
 bool TensorFlowUtils::DecodeInt64(std::string_view *str_view, uint64_t *value) {
   if (str_view == nullptr || value == nullptr) {
-    *value = 0;
     MS_LOG(ERROR) << "str_view or value is nullptr";
     return false;
   }
@@ -122,10 +121,10 @@ std::string TensorFlowUtils::GetFlattenNodeName(const std::string &input_name) {
                                         std::sregex_token_iterator());
   std::string ret = input_name;
   if (input_splits.size() == 3) {
-    if (input_splits[2] == "0") {
+    if (input_splits[2].compare("0") == 0) {
       ret = input_splits[0];
     } else {
-      ret = input_splits[0] + input_splits[2];  // multi output node
+      ret = input_splits[0] + ":" + input_splits[2];  // multi output node
     }
   }
   return ret;

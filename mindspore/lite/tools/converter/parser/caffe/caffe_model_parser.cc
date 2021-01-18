@@ -54,6 +54,8 @@ FuncGraphPtr CaffeModelParser::Parse(const std::string &model_file, const std::s
     ReturnCode::GetSingleReturnCode()->UpdateReturnCode(status);
     return nullptr;
   }
+  func_graph_ptr_->set_attr("graph_name", MakeValue("main_graph"));
+  func_graph_ptr_->set_attr("fmk", MakeValue(static_cast<int>(converter::FmkType_CAFFE)));
   return func_graph_ptr_;
 }
 
@@ -184,7 +186,6 @@ STATUS CaffeModelParser::ConvertGraphInputs() {
       parameter->set_abstract(abstract_tensor);
       parameter->set_name("graph_input-" + std::to_string(i));
       nodes_.insert(std::pair(layer.top(0), parameter));
-      return RET_OK;
     }
   }
 
@@ -356,7 +357,15 @@ STATUS CaffeModelParser::ConvertBlobs(const caffe::LayerParameter &layer, std::v
     } else {
       count = layer.blobs(i).data_size();
       auto buf = std::make_unique<float[]>(count);
+      if (buf == nullptr) {
+        MS_LOG(INFO) << "new buffer failed";
+        return RET_NULL_PTR;
+      }
       const float *data_ptr = layer.blobs(i).data().data();
+      if (data_ptr == nullptr) {
+        MS_LOG(INFO) << "data of origin layer is nullptr";
+        return RET_NULL_PTR;
+      }
       if (EOK != ::memcpy_s(buf.get(), count * sizeof(float), data_ptr, count * sizeof(float))) {
         MS_LOG(ERROR) << "memcpy_s failed.";
         return RET_ERROR;

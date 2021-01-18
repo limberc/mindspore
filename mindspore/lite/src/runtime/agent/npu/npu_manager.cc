@@ -15,57 +15,96 @@
  */
 
 #include "src/runtime/agent/npu/npu_manager.h"
+#include <sys/system_properties.h>
 #include <sys/fcntl.h>
 #include <unistd.h>
 #include "include/hiai_ir_build.h"
 #include "include/HiAiModelManagerService.h"
 #include "include/errorcode.h"
-#include "include/graph/op/all_ops.h"
 #include "src/common/file_utils.h"
 
 namespace mindspore::lite {
-
-bool NPUManager::IsSupportNPU() {
-  if (!is_npu_check_executor) {
-    CheckSupportNPU();
+#define MAX_MODEL_NUM 20
+int NPUManager::CompareVersion(const string &version1, const string &version2) {
+  std::istringstream iss1(version1);
+  std::istringstream iss2(version2);
+  string string1;
+  string string2;
+  while (!iss1.eof() || !iss2.eof()) {
+    getline(iss1, string1, '.');
+    getline(iss2, string2, '.');
+    if (stoi(string1) > stoi(string2)) return 1;
+    if (stoi(string1) < stoi(string2)) return -1;
+    string1 = string2 = "0";
   }
-  if (is_support_npu) {
-    MS_LOG(INFO) << "The current device support NPU.";
-    return true;
-  } else {
-    MS_LOG(INFO) << "The current device NOT SUPPORT NPU.";
-    return false;
-  }
+  return 0;
 }
 
-std::string NPUManager::GetExecutorPath() {
-  std::string executor_path;
-  char cmdline[1024] = {0};
-  int fd = open("/proc/self/cmdline", O_RDONLY);
-  if (fd >= 0) {
-    char ch;
-    int i = 0;
-    while (read(fd, &ch, sizeof(ch)) > 0 && !isspace(ch)) {
-      if (':' == ch) {
-        break;
-      }
-      cmdline[i] = ch;
-      i++;
+bool NPUManager::CheckEMUIVersion() {
+  char emui[128] = {0x00};
+  __system_property_get("ro.build.version.emui", emui);
+  std::string emui_str = emui;
+  int pos = emui_str.find('_');
+  if (pos != std::string::npos) {
+    auto version = emui_str.substr(pos + 1);
+    int ret = CompareVersion(version, "10.0.0");
+    if (ret < 0) {
+      MS_LOG(WARNING) << "EMUI version " << version << " less than 10.0.0";
+      return false;
     }
-    close(fd);
   }
-  executor_path = std::string(cmdline);
-  if (executor_path.empty()) {
-    executor_path = "./";
+  return true;
+}
+
+void NPUManager::Reset() {
+  index_ = 0;
+  domi::HiaiIrBuild ir_build;
+  for (const auto &model_map : models_) {
+    auto model = model_map.second;
+    if (!model->is_freed_) {
+      ir_build.ReleaseModelBuff(*model->model_buffer_data_);
+      model->model_buffer_data_ = nullptr;
+      model->is_freed_ = true;
+      model->desc_.reset();
+      model->desc_ = nullptr;
+      model->client_.reset();
+    }
   }
-  // android
-  if (executor_path.substr(0, 11) == "/data/data/") {
-    executor_path = executor_path + '/';
+  models_.clear();
+  for (auto client : clients_) {
+    client->UnLoadModel();
+    client.reset();
+  }
+  clients_.clear();
+}
+
+bool NPUManager::CheckDDKVersion() {
+  auto client = std::make_shared<hiai::AiModelMngerClient>();
+  if (client->GetVersion() != nullptr) {
+    std::string version = client->GetVersion();
+    int ret = CompareVersion(version, "100.320.010.023");
+    if (ret < 0) {
+      MS_LOG(WARNING) << "DDK Version " << version << " less than 100.320.010.023";
+      return false;
+    }
+  }
+  return true;
+}
+bool NPUManager::IsSupportNPU() {
+  // Avoid multiple checks
+  if (!is_check_version_) {
+    is_check_version_ = true;
+    if (IsKirinChip() && CheckEMUIVersion() && CheckDDKVersion()) {
+      is_support_ = true;
+      MS_LOG(INFO) << "The current device support NPU.";
+    } else {
+      is_support_ = false;
+      MS_LOG(WARNING) << "The current device NOT SUPPORT NPU.";
+    }
+    return is_support_;
   } else {
-    // Linux
-    executor_path = executor_path.substr(0, executor_path.rfind('/')) + "/";
+    return is_support_;
   }
-  return executor_path;
 }
 
 bool NPUManager::IsKirinChip() {
@@ -83,12 +122,18 @@ bool NPUManager::IsKirinChip() {
     if (index == string::npos) {
       continue;
     }
+    // support Kirin 990 5G\990E\9000E
+    if (line.find("990") != string::npos || line.find("9000") != string::npos) {
+      cpu_info.close();
+      return true;
+    }
     auto kirin_number_str = line.substr(index + 5);
     auto kirin_number = atoi(kirin_number_str.c_str());
     if (kirin_number >= 985 || kirin_number == 810 || kirin_number == 820) {
       cpu_info.close();
       return true;
     } else {
+      MS_LOG(WARNING) << "Unsupported KirinChip " << kirin_number;
       cpu_info.close();
       return false;
     }
@@ -96,125 +141,103 @@ bool NPUManager::IsKirinChip() {
   return false;
 }
 
-bool WriteToOMFile(domi::ModelBufferData om_model_buff, const std::string &om_file_path) {
-  FILE *fp;
-  fp = fopen(om_file_path.c_str(), "wb");
-  if (fp == nullptr) {
-    MS_LOG(ERROR) << om_file_path.c_str() << " open failed.";
-    return false;
-  }
-
-  auto write_size = (uint32_t)fwrite(om_model_buff.data, 1, om_model_buff.length, fp);
-  if (write_size != om_model_buff.length) {
-    fclose(fp);
-    MS_LOG(ERROR) << "Write om file failed.";
-    return false;
-  }
-  fclose(fp);
-  return true;
-}
-
-bool NPUManager::CheckOmBuildIr(const std::string &path) {
-  // build test om model
-  std::shared_ptr<hiai::op::Add> add_op(new (std::nothrow) hiai::op::Add("add"));
-  if (add_op == nullptr) {
-    MS_LOG(ERROR) << "new add_op failed.";
-    return false;
-  }
-  ge::TensorDesc desc(ge::Shape({1}), ge::FORMAT_NCHW, ge::DT_FLOAT);
-  std::shared_ptr<hiai::op::Data> data = std::make_shared<hiai::op::Data>("data");
-  data->update_input_desc_x(desc);
-  add_op->set_input_x1(*data);
-  add_op->set_input_x2(*data);
-  domi::HiaiIrBuild ir_build;
-  ge::Graph ir_graph("graph");
-  std::vector<ge::Operator> inputs{*data, *data};
-  std::vector<ge::Operator> outputs{*add_op};
-  ir_graph.SetInputs(inputs).SetOutputs(outputs);
-  ge::Model om_model("test_model", "test_version");
-  om_model.SetGraph(ir_graph);
-
-  domi::ModelBufferData om_model_buff;
-  if (!ir_build.CreateModelBuff(om_model, om_model_buff)) {
-    MS_LOG(ERROR) << "Create model buffer failed.";
-    return false;
-  }
-  if (!ir_build.BuildIRModel(om_model, om_model_buff)) {
-    MS_LOG(ERROR) << "Build IR model failed.";
-    return false;
-  }
-
-  // save test om model
-  remove(path.c_str());
-  bool ret = WriteToOMFile(om_model_buff, path);
-  ir_build.ReleaseModelBuff(om_model_buff);
-  return ret;
-}
-
-void NPUManager::CheckSupportNPU() {
-  is_npu_check_executor = true;
-  std::string path_string = GetExecutorPath();
-
-  std::string test_model_path = path_string + "/mindspore_lite_test_npu.om";
-  std::ifstream ifs(test_model_path);
-  if (ifs.good() && ifs.is_open()) {
-    ifs.close();
-    is_support_npu = true;
-    return;
-  }
-  if (!IsKirinChip()) {
-    MS_LOG(ERROR) << "The current device chip NOT SUPPORT NPU";
-    is_support_npu = false;
-    return;
-  }
-
-  if (!CheckOmBuildIr(test_model_path)) {
-    MS_LOG(ERROR) << "Build OM IR error.";
-    is_support_npu = false;
-    return;
-  }
-  is_support_npu = true;
-}
-
-int NPUManager::AddModel(void *model_buf, uint32_t size, const std::string &model_name, int frequency) {
-  hiai::MemBuffer *buffer = mc_builder_->InputMemBufferCreate(model_buf, size);
-  if (buffer == nullptr) {
-    MS_LOG(ERROR) << "MemBuffer is null.";
-    return RET_ERROR;
-  }
-
+int NPUManager::AddModel(domi::ModelBufferData *model_buffer_data, const std::string &model_name, int frequency) {
+  auto model = new SubGraphModel(index_, model_name, model_buffer_data);
   auto desc = std::make_shared<hiai::AiModelDescription>(model_name, frequency, 0, 0, 0);
-  desc->SetModelBuffer(buffer->GetMemBufferData(), buffer->GetMemBufferSize());
-  model_desc_.push_back(desc);
-  mc_builder_->MemBufferDestroy(buffer);
-
+  model->desc_ = desc;
+  models_.insert({model_name, model});
   index_++;
   return RET_OK;
 }
 
-int NPUManager::InitClient() {
-  this->client_ = std::make_shared<hiai::AiModelMngerClient>();
-  if (this->client_ == nullptr) {
-    return RET_ERROR;
+std::shared_ptr<hiai::AiModelMngerClient> NPUManager::CreateAiModelMngerClient() {
+  auto client = std::make_shared<hiai::AiModelMngerClient>();
+  if (client == nullptr) {
+    MS_LOG(ERROR) << "NPU client is nullptr.";
+    return nullptr;
   }
-  int ret = this->client_->Init(nullptr);
+  int ret = client->Init(nullptr);
   if (ret != hiai::AI_SUCCESS) {
-    return RET_ERROR;
+    MS_LOG(ERROR) << "NPU client init failed. code is " << ret;
+    return nullptr;
   }
-  mc_builder_ = std::make_shared<hiai::AiModelBuilder>(this->client_);
-  return RET_OK;
+  return client;
 }
 
 int NPUManager::LoadOMModel() {
-  int ret = this->client_->Load(model_desc_);
+  std::vector<std::shared_ptr<hiai::AiModelDescription>> models_desc;
+  std::shared_ptr<hiai::AiModelMngerClient> client = nullptr;
+  std::shared_ptr<hiai::AiModelBuilder> mc_builder = nullptr;
+  int total = 0;
+  for (const auto &model_map : models_) {
+    if (total % MAX_MODEL_NUM == 0) {
+      client = CreateAiModelMngerClient();
+      if (client == nullptr) {
+        MS_LOG(ERROR) << "Create Client failed.";
+        return RET_ERROR;
+      }
+      mc_builder = std::make_shared<hiai::AiModelBuilder>(client);
+      if (mc_builder == nullptr) {
+        MS_LOG(ERROR) << "Create AiModelBuilder failed.";
+        return RET_ERROR;
+      }
+    }
+    total++;
+    auto model = model_map.second;
+    if (model->is_loaded_ && model->is_freed_) {
+      continue;
+    }
+    models_desc.push_back(model->desc_);
+
+    auto buffer = mc_builder->InputMemBufferCreate(model->model_buffer_data_->data, model->model_buffer_data_->length);
+    if (buffer == nullptr) {
+      MS_LOG(ERROR) << "NPU input memory buffer create failed.";
+      return RET_ERROR;
+    }
+    model->desc_->SetModelBuffer(model->model_buffer_data_->data, model->model_buffer_data_->length);
+    if (models_desc.size() == MAX_MODEL_NUM) {
+      auto ret = LoadModel(client, models_desc);
+      if (ret != RET_ERROR) {
+        MS_LOG(ERROR) << "Client load model failed.";
+        return RET_ERROR;
+      }
+      models_desc.clear();
+    }
+  }
+
+  if (!models_desc.empty()) {
+    auto ret = LoadModel(client, models_desc);
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "Client load model failed.";
+      return RET_ERROR;
+    }
+    models_desc.clear();
+  }
+
+  return RET_OK;
+}
+
+std::shared_ptr<hiai::AiModelMngerClient> NPUManager::GetClient(const std::string &model_name) {
+  return models_[model_name]->client_;
+}
+
+int NPUManager::index() const { return index_; }
+
+int NPUManager::LoadModel(const std::shared_ptr<hiai::AiModelMngerClient> &client,
+                          std::vector<std::shared_ptr<hiai::AiModelDescription>> desc_list) {
+  auto ret = client->Load(desc_list);
   if (ret != hiai::AI_SUCCESS) {
     MS_LOG(ERROR) << "Client load model failed." << ret;
     return RET_ERROR;
   }
+
+  for (const auto &desc : desc_list) {
+    auto it = models_.find(desc->GetName());
+    it->second->is_loaded_ = true;
+    it->second->client_ = client;
+  }
+
+  this->clients_.push_back(client);
   return RET_OK;
 }
-
-std::shared_ptr<hiai::AiModelMngerClient> NPUManager::GetClient() { return client_; }
-
-int NPUManager::index() { return index_; }
 }  // namespace mindspore::lite

@@ -58,6 +58,7 @@ int ReduceCPUKernel::Init() {
     }
     case static_cast<int>(ReduceMode_ReduceMax): {
       reducer_ = ReduceMax;
+      int_reducer_ = IntReduceMax;
       break;
     }
     case static_cast<int>(ReduceMode_ReduceMin): {
@@ -234,4 +235,8 @@ void ReduceCPUKernel::FreeTmpBuffer() {
   }
   data_buffers_.clear();
 }
+
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Reduce, LiteKernelCreator<ReduceCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt, PrimitiveType_Reduce, LiteKernelCreator<ReduceCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Reduce, LiteKernelCreator<ReduceCPUKernel>)
 }  // namespace mindspore::kernel

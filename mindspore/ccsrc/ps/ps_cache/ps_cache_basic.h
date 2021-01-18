@@ -34,16 +34,16 @@ class PsCacheBasic {
   virtual ~PsCacheBasic() = default;
   virtual bool InitDevice(uint32_t device_id, const void *context) = 0;
   virtual void *MallocMemory(size_t size) = 0;
-  virtual bool MallocConstantMemory(size_t constant_value) { return true; }
+  virtual bool MallocConstantMemory(size_t cache_vocab_size) { return true; }
   virtual bool RecordEvent() = 0;
   virtual bool SynchronizeEvent() = 0;
   virtual bool SynchronizeStream() = 0;
   virtual bool CopyHostMemToDevice(void *dst, void *src, size_t size) = 0;
   virtual bool CopyDeviceMemToHost(void *dst, void *src, size_t size) = 0;
   virtual bool HashSwapOut(void *hash_table_addr, void *swap_out_value_addr, void *swap_out_index_addr,
-                           size_t hash_table_size, size_t embedding_size, size_t swap_out_size) = 0;
+                           size_t cache_vocab_size, size_t embedding_size, size_t swap_out_size) = 0;
   virtual bool HashSwapIn(void *hash_table_addr, void *swap_in_value_addr, void *swap_in_index_addr,
-                          size_t hash_table_size, size_t embedding_size, size_t swap_in_size) = 0;
+                          size_t cache_vocab_size, size_t embedding_size, size_t swap_in_size) = 0;
 
  protected:
   void *stream_;

@@ -22,8 +22,10 @@
 #include <utility>
 #include <vector>
 #include "minddata/dataset/engine/consumers/tree_consumer.h"
-#include "minddata/dataset/engine/tree_adapter.h"
+#include "minddata/dataset/engine/datasetops/device_queue_op.h"
 #include "minddata/dataset/engine/opt/pre/getter_pass.h"
+#include "minddata/dataset/engine/tree_adapter.h"
+#include "minddata/mindrecord/include/shard_index_generator.h"
 
 #ifndef ENABLE_ANDROID
 #include "minddata/mindrecord/include/shard_header.h"
@@ -60,7 +62,7 @@ Status IteratorConsumer::GetNextAsVector(std::vector<TensorPtr> *out) {
   return Status::OK();
 }
 
-Status IteratorConsumer::GetNextAsMap(std::unordered_map<std::string, TensorPtr> *out_map) {
+Status IteratorConsumer::GetNextAsMap(std::unordered_map<std::string, TensorPtr> *const out_map) {
   RETURN_UNEXPECTED_IF_NULL(out_map);
   out_map->clear();
 
@@ -77,7 +79,7 @@ Status IteratorConsumer::GetNextAsMap(std::unordered_map<std::string, TensorPtr>
   return Status::OK();
 }
 
-Status IteratorConsumer::GetNextAsOrderedPair(std::vector<std::pair<std::string, std::shared_ptr<Tensor>>> *vec) {
+Status IteratorConsumer::GetNextAsOrderedPair(std::vector<std::pair<std::string, std::shared_ptr<Tensor>>> *const vec) {
   CHECK_FAIL_RETURN_UNEXPECTED(vec != nullptr && vec->empty(), "vec is null or non-empty.");
 
   TensorRow curr_row;
@@ -140,7 +142,7 @@ Status ToDevice::Stop() {
   return Status::OK();
 }
 
-Status ToDevice::GetDataInfo(std::vector<DataType> *types, std::vector<TensorShape> *shapes) {
+Status ToDevice::GetDataInfo(std::vector<DataType> *const types, std::vector<TensorShape> *const shapes) {
   // tree_.root() must be DeviceQueueOp
   std::shared_ptr<DatasetOp> root = std::shared_ptr<DatasetOp>(tree_adapter_->GetRoot());
   CHECK_FAIL_RETURN_UNEXPECTED(root != nullptr, "Root is a nullptr.");
@@ -515,17 +517,6 @@ Status TreeGetters::GetClassIndexing(std::vector<std::pair<std::string, std::vec
   return Status::OK();
 }
 
-Status TreeGetters::InternalInit(int8_t type) {
-  if (init_flag_) return Status::OK();
-  tree_adapter_->SetPrePassOverride([&type](OptPass pre) {
-    pre.push_back(std::make_unique<GetterPass>(static_cast<GetterPass::GetterType>(type)));
-    return pre;
-  });
-  Status s = tree_adapter_->Compile(std::move(root_), 1);
-  if (s.IsOk()) init_flag_ = true;
-  return s;
-}
-
 Status TreeGetters::InternalInit() {
   if (init_flag_) return Status::OK();
   Status s = tree_adapter_->Compile(std::move(root_), 1);
@@ -535,7 +526,7 @@ Status TreeGetters::InternalInit() {
 
 Status TreeGetters::GetFirstRowShapeAndType() {
   RETURN_OK_IF_TRUE(first_row_obtained_);
-  RETURN_IF_NOT_OK(InternalInit(static_cast<int8_t>(GetterPass::kOutputShapeAndType)));
+  RETURN_IF_NOT_OK(InternalInit());
   TensorRow first_row;
   RETURN_IF_NOT_OK(GetRow(&first_row));
   std::transform(first_row.begin(), first_row.end(), std::back_inserter(first_row_type_),
@@ -572,11 +563,6 @@ Status DatasetSizeGetter::Init(std::shared_ptr<DatasetNode> d) {
 Status DatasetSizeGetter::DryRun(std::shared_ptr<DatasetNode> ir_node, int64_t *dataset_size) {
   std::shared_ptr<TreeAdapter> tree_adapter = std::make_shared<TreeAdapter>(TreeAdapter::UsageFlag::kDeGetter);
   tree_adapters_.push_back(tree_adapter);
-  tree_adapter->SetPrePassOverride([](OptPass pre) {
-    pre.push_back(
-      std::make_unique<GetterPass>(static_cast<GetterPass::GetterType>(GetterPass::GetterType::kDatasetSize)));
-    return pre;
-  });
   RETURN_IF_NOT_OK(tree_adapter->Compile(ir_node, 1));
   TensorRow row;
   RETURN_IF_NOT_OK(GetRow(tree_adapter, &row));
@@ -593,6 +579,8 @@ Status DatasetSizeGetter::GetRow(const std::shared_ptr<TreeAdapter> &tree_adapte
 }
 Status DatasetSizeGetter::Terminate() {
   for (const auto &tree : tree_adapters_) {
+    RETURN_UNEXPECTED_IF_NULL(tree);
+    RETURN_UNEXPECTED_IF_NULL(tree->AllTasks());
     RETURN_IF_NOT_OK(tree->AllTasks()->ServiceStop());
   }
   return Status::OK();

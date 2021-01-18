@@ -50,6 +50,7 @@ void AlbumNode::Print(std::ostream &out) const {
 }
 
 Status AlbumNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   RETURN_IF_NOT_OK(ValidateDatasetDirParam("AlbumNode", dataset_dir_));
 
   RETURN_IF_NOT_OK(ValidateDatasetFilesParam("AlbumNode", {schema_path_}));
@@ -64,7 +65,7 @@ Status AlbumNode::ValidateParams() {
 }
 
 // Function to build AlbumNode
-Status AlbumNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
+Status AlbumNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   auto schema = std::make_unique<DataSchema>();
   RETURN_IF_NOT_OK(schema->LoadSchemaFile(schema_path_, column_names_));
 

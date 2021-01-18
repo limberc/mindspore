@@ -17,6 +17,7 @@
 #include "src/runtime/kernel/arm/base/switch.h"
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
+#include "src/tensorlist.h"
 
 using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
@@ -28,8 +29,8 @@ int SwitchCPUKernel::PostProcess() {
   auto bool_tensor = in_tensors_.front();
   MS_ASSERT(bool_tensor != nullptr);
   MS_ASSERT(bool_tensor->data_type() == kNumberTypeBool);
-  MS_ASSERT(bool_tensor->shape().size() == 1);
-  MS_ASSERT(bool_tensor->shape().front() == 1);
+  MS_ASSERT(bool_tensor->Size() == 1);
+  MS_ASSERT(bool_tensor->Size() == 1);
   auto active = static_cast<bool *>(bool_tensor->data_c());
   if (active == nullptr) {
     MS_LOG(ERROR) << "data of bool tensor is nullptr";
@@ -42,12 +43,22 @@ int SwitchCPUKernel::PostProcess() {
     auto out_tensor = out_tensors_.at(out_index++);
     out_tensor->ResetRefCount();
   }
+  if (!*active) {
+    for (auto &in_tensor : this->in_tensors_) {
+      MS_ASSERT(in_tensor != nullptr);
+      auto root_tensor = in_tensor->root_tensor();
+      if (root_tensor == nullptr) {
+        continue;
+      }
+      root_tensor->DecRefCount();
+    }
+  }
   return FreeInWorkTensor();
 }
 
 int SwitchCPUKernel::Init() { return RET_OK; }
 
-int SwitchCPUKernel::ReSize() { return RET_ERROR; }
+int SwitchCPUKernel::ReSize() { return RET_OK; }
 
 // inputs: bool*1 data*n
 // output: true-data*n, false-data*n
@@ -56,59 +67,32 @@ int SwitchCPUKernel::Run() {
   auto bool_tensor = in_tensors_.front();
   MS_ASSERT(bool_tensor != nullptr);
   MS_ASSERT(bool_tensor->data_type() == kNumberTypeBool);
-  MS_ASSERT(bool_tensor->shape().size() == 1);
-  MS_ASSERT(bool_tensor->shape().front() == 1);
+  MS_ASSERT(bool_tensor->Size() == 1);
+  MS_ASSERT(bool_tensor->Size() == 1);
   auto active = static_cast<bool *>(bool_tensor->data_c());
   if (active == nullptr) {
     MS_LOG(ERROR) << "data of bool tensor is nullptr";
     return lite::RET_NULL_PTR;
   }
-  size_t in_index = 1;
-  size_t out_index = (*active) ? 0 : (out_tensors_.size() / 2);
-  while (in_index < in_tensors_.size()) {
-    auto in_tensor = in_tensors_.at(in_index++);
-    auto out_tensor = out_tensors_.at(out_index++);
-    MS_ASSERT(in_tensor != nullptr);
-    MS_ASSERT(out_tensor != nullptr);
-    auto input = in_tensor->data_c();
-    auto output = out_tensor->data_c();
-    MS_ASSERT(in_tensor->Size() == out_tensor->Size());
-    if (input == nullptr || output == nullptr) {
-      MS_LOG(ERROR) << "input tensor or output tensor have not been malloced";
-      return lite::RET_NULL_PTR;
+  if (*active) {
+    auto ret = MoveData(this->out_tensors_.begin(), this->out_tensors_.begin() + out_tensors_.size() / 2,
+                        this->in_tensors_.begin() + 1, this->in_tensors_.end());
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "carry data error : " << ret;
+      return ret;
     }
-    memcpy(output, input, in_tensor->Size());
+  } else {
+    auto ret = MoveData(this->out_tensors_.begin() + out_tensors_.size() / 2, this->out_tensors_.end(),
+                        this->in_tensors_.begin() + 1, this->in_tensors_.end());
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "carry data error : " << ret;
+      return ret;
+    }
   }
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuSwitchKernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                           const std::vector<lite::Tensor *> &outputs, OpParameter *parameter,
-                                           const lite::InnerContext *ctx, const KernelKey &desc,
-                                           const mindspore::lite::PrimitiveC *primitive) {
-  if (parameter == nullptr) {
-    MS_LOG(ERROR) << "parameter is nullptr";
-    return nullptr;
-  }
-  if (desc.type != PrimitiveType_Switch) {
-    MS_LOG(ERROR) << "type in desc is not Switch";
-    free(parameter);
-    return nullptr;
-  }
-  if (ctx == nullptr) {
-    MS_LOG(ERROR) << "ctx is nullptr";
-    free(parameter);
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) SwitchCPUKernel(parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "Create kernel failed, name: " << parameter->name_;
-    free(parameter);
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Switch, CpuSwitchKernelCreator)
-REG_KERNEL(kCPU, kNumberTypeBool, PrimitiveType_Switch, CpuSwitchKernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Switch, LiteKernelCreator<SwitchCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeBool, PrimitiveType_Switch, LiteKernelCreator<SwitchCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Switch, LiteKernelCreator<SwitchCPUKernel>)
 }  // namespace mindspore::kernel

@@ -17,11 +17,10 @@
 #ifndef MINDSPORE_LITE_NNACL_COMMON_FUNC_H_
 #define MINDSPORE_LITE_NNACL_COMMON_FUNC_H_
 
-#include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 #include "nnacl/op_base.h"
 #include "nnacl/conv_parameter.h"
+#include "nnacl/nnacl_common.h"
 
 #ifdef __cplusplus
 extern "C" {

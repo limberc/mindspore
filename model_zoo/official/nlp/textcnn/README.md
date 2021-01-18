@@ -83,6 +83,7 @@ After installing MindSpore via the official website, you can start training and 
         │   ├── config.py            // parameter configuration
         ├── train.py               // training script
         ├── eval.py               //  evaluation script
+        ├── export.py               //  export checkpoint to other format file
 ```
 
 ## [Script Parameters](#contents)
@@ -104,6 +105,7 @@ Parameters for both training and evaluation can be set in config.py
   'checkpoint_path': './train_textcnn.ckpt'  # the absolute full path to save the checkpoint file
   'word_len': 51            # The length of the word
   'vec_length': 40          # The length of the vector
+  'base_lr': 1e-3          # The base learning rate
   ```
 
 For more configuration details, please refer the script `config.py`.

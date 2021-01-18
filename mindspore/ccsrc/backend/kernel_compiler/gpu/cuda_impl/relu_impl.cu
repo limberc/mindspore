@@ -31,9 +31,11 @@ void CalReLU(int size, T *input_addr, T *output_addr, cudaStream_t cuda_stream) 
   return;
 }
 
+template void CalReLU(int size, double *input_addr, double *output_addr, cudaStream_t cuda_stream);
 template void CalReLU(int size, float *input_addr, float *output_addr, cudaStream_t cuda_stream);
 template void CalReLU(int size, half *input_addr, half *output_addr, cudaStream_t cuda_stream);
 template void CalReLU(int size, int8_t *input_addr, int8_t *output_addr, cudaStream_t cuda_stream);
+template void CalReLU(int size, int16_t *input_addr, int16_t *output_addr, cudaStream_t cuda_stream);
 template void CalReLU(int size, int32_t *input_addr, int32_t *output_addr, cudaStream_t cuda_stream);
 template void CalReLU(int size, int64_t *input_addr, int64_t *output_addr, cudaStream_t cuda_stream);
 
@@ -69,14 +71,23 @@ void ReluGradV2(const size_t num, const T *dy, const uint32_t *mask, T *dx, cuda
   ReluGradV2Kernel<<<kBlocksPerGrid(num), kThreadsPerBlock, 0, cuda_stream>>>(num, dy, mask, dx);
 }
 
+template void ReluV2(const size_t num, const double *x, double *y, uint32_t *mask, cudaStream_t cuda_stream);
 template void ReluV2(const size_t num, const float *x, float *y, uint32_t *mask, cudaStream_t cuda_stream);
 template void ReluV2(const size_t num, const half *x, half *y, uint32_t *mask, cudaStream_t cuda_stream);
+template void ReluV2(const size_t num, const int8_t *x, int8_t *y, uint32_t *mask, cudaStream_t cuda_stream);
+template void ReluV2(const size_t num, const int16_t *x, int16_t *y, uint32_t *mask, cudaStream_t cuda_stream);
 template void ReluV2(const size_t num, const int32_t *x, int32_t *y, uint32_t *mask, cudaStream_t cuda_stream);
 template void ReluV2(const size_t num, const int64_t *x, int64_t *y, uint32_t *mask, cudaStream_t cuda_stream);
 
+template void ReluGradV2(const size_t num, const double *dy, const uint32_t *mask, double *dx,
+        cudaStream_t cuda_stream);
 template void ReluGradV2(const size_t num, const float *dy, const uint32_t *mask, float *dx, cudaStream_t cuda_stream);
 template void ReluGradV2(const size_t num, const half *dy, const uint32_t *mask, half *dx, cudaStream_t cuda_stream);
+template void ReluGradV2(const size_t num, const int8_t *dy, const uint32_t *mask, int8_t *dx,
+        cudaStream_t cuda_stream);
+template void ReluGradV2(const size_t num, const int16_t *dy, const uint32_t *mask, int16_t *dx,
+        cudaStream_t cuda_stream);
 template void ReluGradV2(const size_t num, const int32_t *dy, const uint32_t *mask, int32_t *dx,
-                         cudaStream_t cuda_stream);
+        cudaStream_t cuda_stream);
 template void ReluGradV2(const size_t num, const int64_t *dy, const uint32_t *mask, int64_t *dx,
-                         cudaStream_t cuda_stream);
+        cudaStream_t cuda_stream);

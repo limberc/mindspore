@@ -66,6 +66,8 @@ class LiteSession : public session::LiteSession {
   int Resize(const std::vector<mindspore::tensor::MSTensor *> &inputs,
              const std::vector<std::vector<int>> &dims) override;
 
+  void set_model(Model *model) { this->model_ = model; }
+
  protected:
   static void ConvertTensorsQuantParam(const schema::Tensor *src_tensor, lite::Tensor *dst_tensor);
 
@@ -88,8 +90,6 @@ class LiteSession : public session::LiteSession {
 
   void InitGraphOutputNodeMap(const lite::Model *model);
 
-  void InitGraphOutputTensorNames(const lite::Model *model);
-
   void InitGraphOutputTensorMap(const lite::Model *model);
 
   void AdjustModelOutputTensorInitRefCount(const lite::Model *model);
@@ -102,8 +102,6 @@ class LiteSession : public session::LiteSession {
 
  private:
   void ResetInputsShape(const std::vector<std::vector<int>> &dims);
-
-  int InitNPURuntime();
 
   int InitGPURuntime();
 
@@ -127,9 +125,10 @@ class LiteSession : public session::LiteSession {
   // graph output tensor name -- output tensor
   std::unordered_map<std::string, mindspore::tensor::MSTensor *> output_tensor_map_;
   Executor *executor_ = nullptr;
+  Model *model_ = nullptr;
   std::atomic<bool> is_running_ = false;
-#if SUPPORT_GPU
-  opencl::OpenCLRuntimeWrapper ocl_runtime_wrap_;
+#if SUPPORT_GPU && !SUPPORT_TRAIN
+  opencl::OpenCLRuntimeWrapper *opencl_runtime_wrapper_{nullptr};
 #endif
 };
 }  // namespace lite

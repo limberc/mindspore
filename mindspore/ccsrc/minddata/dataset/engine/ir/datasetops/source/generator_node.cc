@@ -20,7 +20,9 @@
 #include <string>
 #include <vector>
 
+#include "minddata/dataset/engine/datasetops/repeat_op.h"
 #include "minddata/dataset/engine/datasetops/source/generator_op.h"
+#include "minddata/dataset/engine/opt/pass.h"
 #include "minddata/dataset/util/status.h"
 
 namespace mindspore {
@@ -31,10 +33,11 @@ GeneratorNode::GeneratorNode(py::function generator_function, const std::vector<
     : MappableSourceNode(),
       generator_function_(generator_function),
       column_names_(column_names),
-      column_types_(column_types) {}
+      column_types_(column_types),
+      reset_ancestor_(nullptr) {}
 
 GeneratorNode::GeneratorNode(py::function generator_function, const std::shared_ptr<SchemaObj> &schema)
-    : generator_function_(generator_function), schema_(schema) {}
+    : MappableSourceNode(), generator_function_(generator_function), schema_(schema), reset_ancestor_(nullptr) {}
 
 std::shared_ptr<DatasetNode> GeneratorNode::Copy() {
   std::shared_ptr<GeneratorNode> node;
@@ -43,14 +46,15 @@ std::shared_ptr<DatasetNode> GeneratorNode::Copy() {
   } else {
     node = std::make_shared<GeneratorNode>(generator_function_, schema_);
   }
+  node->SetGeneratorDatasetSize(dataset_size_);
   return node;
 }
 
 void GeneratorNode::Print(std::ostream &out) const {
-  out << Name() + "(<func>:" + ",columns:" + PrintColumns(column_names_) + ",<col_types>)";
+  out << Name() + "(<func>:" + ",columns:" + PrintColumns(column_names_) + ",<col_types>) ";
 }
 
-Status GeneratorNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
+Status GeneratorNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   std::unique_ptr<DataSchema> data_schema = std::make_unique<DataSchema>();
 
   if (schema_ != nullptr) {
@@ -69,7 +73,7 @@ Status GeneratorNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
   // GeneratorOp's constructor takes in a prefetch_size, which isn't being set by user nor is it being used by
   // GeneratorOp internally. Here it is given a zero which is the default in generator builder
   std::shared_ptr<GeneratorOp> op = std::make_shared<GeneratorOp>(generator_function_, column_names_, column_types_, 0,
-                                                                  rows_per_buffer_, connector_que_size_);
+                                                                  rows_per_buffer_, connector_que_size_, dataset_size_);
 
   // Init() is called in builder when generator is built. Here, since we are getting away from the builder class, init
   // needs to be called when the op is built. The caveat is that Init needs to be made public (before it is private).
@@ -77,18 +81,42 @@ Status GeneratorNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
   // best be delivered when the test cases for this api is ready.
   RETURN_IF_NOT_OK(op->Init());
 
-  node_ops->push_back(op);
+  // Add this GeneratorOp to its RepeatOp/EpochCtrlOp ancestor's EOE list.
+  // When the ancestor reaches an end-of-epoch boundary, it will send a "reset" signal to all the ops in the EOE list.
+  // The ancestor is updated by GeneratorNodePass post pass.
+  // Assumption:
+  //   We build the run-time ops from IR nodes from top to bottom. Hence Repeat/EpochCtrl ancestor ops are built
+  //   before this leaf Generator op is built.
+  if (reset_ancestor_ != nullptr) {
+    reset_ancestor_->op_->AddToEoeList(op);
+  }
 
+  node_ops->push_back(op);
   return Status::OK();
 }
 
 // no validation is needed for generator op.
-Status GeneratorNode::ValidateParams() { return Status::OK(); }
+Status GeneratorNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
+  return Status::OK();
+}
 
 Status GeneratorNode::GetShardId(int32_t *shard_id) {
   RETURN_UNEXPECTED_IF_NULL(shard_id);
   *shard_id = 0;
   return Status::OK();
+}
+
+// Visitor accepting method for IRNodePass
+Status GeneratorNode::Accept(IRNodePass *p, bool *const modified) {
+  // Downcast shared pointer then call visitor
+  return p->Visit(shared_from_base<GeneratorNode>(), modified);
+}
+
+// Visitor accepting method for IRNodePass
+Status GeneratorNode::AcceptAfter(IRNodePass *p, bool *const modified) {
+  // Downcast shared pointer then call visitor
+  return p->VisitAfter(shared_from_base<GeneratorNode>(), modified);
 }
 }  // namespace dataset
 }  // namespace mindspore

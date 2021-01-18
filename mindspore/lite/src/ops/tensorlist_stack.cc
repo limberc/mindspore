@@ -117,6 +117,9 @@ bool TensorListStack::IsFullyDefined(const std::vector<int> &shape) const {
 }
 
 int TensorListStack::InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) {
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
+  }
   auto input0 = reinterpret_cast<TensorList *>(inputs_.front());
   MS_ASSERT(input0 != nullptr);
   if (input0->ElementsNum() == 0) {
@@ -130,7 +133,8 @@ int TensorListStack::InferShape(std::vector<lite::Tensor *> inputs_, std::vector
     return RET_NULL_PTR;
   }
   auto ele_shape_ptr = reinterpret_cast<int *>(ele_shape->data_c());
-  for (int i = 0; ele_shape->ElementsNum(); ++i) {
+  output_shape_.clear();
+  for (int i = 0; i < ele_shape->ElementsNum(); ++i) {
     output_shape_.push_back(ele_shape_ptr[i]);
   }
 
@@ -145,7 +149,7 @@ int TensorListStack::InferShape(std::vector<lite::Tensor *> inputs_, std::vector
   }
   if (!IsFullyDefined(input0->element_shape())) {
     for (int i = 0; i < input0->ElementsNum(); ++i) {
-      auto tensor_ele = input0->GetTensorIndex(i);
+      auto tensor_ele = input0->GetTensor(i);
       MS_ASSERT(tensor_ele != nullptr);
       if (tensor_ele->data_type() != kTypeUnknown) {
         status = MergeShape(tensor_ele->shape());
@@ -161,6 +165,7 @@ int TensorListStack::InferShape(std::vector<lite::Tensor *> inputs_, std::vector
   output->set_data_type(input0->tensors_data_type());
   output_shape_.insert(output_shape_.begin(), input0->ElementsNum());
   output->set_shape(output_shape_);
+  output->set_format(input0->format());
   return RET_OK;
 }
 

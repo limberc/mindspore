@@ -1,4 +1,3 @@
-#include <climits>
 /*
  * Copyright (c) 2020.Huawei Technologies Co., Ltd. All rights reserved.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,9 +16,14 @@
 #ifndef ACLMANAGER_H
 #define ACLMANAGER_H
 
-#include <string>
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/stat.h>
 #include <string.h>
+#include <sys/types.h>
+#include <string>
 #include <map>
+#include <climits>
 #include <iostream>
 #include <memory>
 #include "acl/acl.h"
@@ -27,10 +31,6 @@
 #include "mindspore/core/utils/log_adapter.h"
 #include "ErrorCode.h"
 #include "DvppCommon.h"
-#include <stdio.h>
-#include <unistd.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 
 mode_t SetFileDefaultUmask();
 
@@ -39,14 +39,14 @@ class AclProcess {
   AclProcess(uint32_t resizeWidth, uint32_t resizeHeight, uint32_t cropWidth, uint32_t cropHeight, aclrtContext context,
              aclrtStream stream = nullptr, std::shared_ptr<DvppCommon> dvppCommon = nullptr);
 
-  ~AclProcess(){};
+  ~AclProcess() {}
 
   // Release all the resource
   APP_ERROR Release();
   // Create resource for this sample
   APP_ERROR InitResource();
   // Process the result
-  APP_ERROR Process(RawData &ImageInfo);
+  APP_ERROR Process(const RawData &ImageInfo);
   // API for access memory
   std::shared_ptr<void> Get_Memory_Data();
   // API for access device memory
@@ -55,10 +55,6 @@ class AclProcess {
   void set_mode(bool flag);
   // Get the mode of Acl process
   bool get_mode();
-  // Save the result
-  APP_ERROR WriteResult(uint32_t fileSize, std::shared_ptr<void> outBuf, std::string filename);
-  // Color space reform
-  void YUV420TOYUV444(unsigned char *inputBuffer, unsigned char *outputBuffer, int w, int h);
   // Crop definition
   void CropConfigFilter(CropRoiConfig &cfg, DvppCropInputInfo &cropinfo);
   // D-chip memory release
@@ -68,9 +64,7 @@ class AclProcess {
   // Initialize the modules used by this sample
   APP_ERROR InitModule();
   // Preprocess the input image
-  APP_ERROR Preprocess(RawData &ImageInfo);
-  // Filename process
-  APP_ERROR RenameFile(std::string &filename);
+  APP_ERROR Preprocess(const RawData &ImageInfo);
 
   aclrtContext context_;
   aclrtStream stream_;

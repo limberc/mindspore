@@ -37,6 +37,9 @@ WeightedRandomSamplerRT::WeightedRandomSamplerRT(int64_t num_samples, const std:
 
 // Initialized this Sampler.
 Status WeightedRandomSamplerRT::InitSampler() {
+  if (is_initialized) {
+    return Status::OK();
+  }
   // Special value of 0 for num_samples means that the user wants to sample the entire set of data.
   // If the user asked to sample more rows than exists in the dataset, adjust the num_samples accordingly.
   if (num_samples_ == 0 || num_samples_ > num_rows_) {
@@ -75,6 +78,7 @@ Status WeightedRandomSamplerRT::InitSampler() {
     discrete_dist_ = std::make_unique<std::discrete_distribution<int64_t>>(weights_.begin(), weights_.end());
   }
 
+  is_initialized = true;
   return Status::OK();
 }
 
@@ -188,6 +192,25 @@ void WeightedRandomSamplerRT::SamplerPrint(std::ostream &out, bool show_all) con
     SamplerRT::SamplerPrint(out, show_all);
     // Then add our own info if any
   }
+}
+
+Status WeightedRandomSamplerRT::to_json(nlohmann::json *out_json) {
+  nlohmann::json args;
+  args["sampler_name"] = "WeightedRandomSampler";
+  args["weights"] = weights_;
+  args["num_samples"] = num_samples_;
+  args["replacement"] = replacement_;
+  if (this->HasChildSampler()) {
+    std::vector<nlohmann::json> children_args;
+    for (auto child : child_) {
+      nlohmann::json child_arg;
+      RETURN_IF_NOT_OK(child->to_json(&child_arg));
+      children_args.push_back(child_arg);
+    }
+    args["child_sampler"] = children_args;
+  }
+  *out_json = args;
+  return Status::OK();
 }
 }  // namespace dataset
 }  // namespace mindspore

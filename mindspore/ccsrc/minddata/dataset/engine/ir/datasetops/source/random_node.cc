@@ -24,6 +24,7 @@
 #include "minddata/dataset/engine/datasetops/source/random_data_op.h"
 #include "minddata/dataset/util/random.h"
 #include "minddata/dataset/util/status.h"
+
 namespace mindspore {
 namespace dataset {
 
@@ -41,6 +42,7 @@ void RandomNode::Print(std::ostream &out) const { out << Name() + "(num_row:" + 
 
 // ValidateParams for RandomNode
 Status RandomNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   if (total_rows_ < 0) {
     std::string err_msg =
       "RandomNode: total_rows must be greater than or equal 0, now get " + std::to_string(total_rows_);
@@ -66,7 +68,7 @@ int32_t RandomNode::GenRandomInt(int32_t min, int32_t max) {
 }
 
 // Build for RandomNode
-Status RandomNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
+Status RandomNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   rand_gen_.seed(GetSeed());  // seed the random generator
   // If total rows was not given, then randomly pick a number
   std::shared_ptr<SchemaObj> schema_obj;

@@ -42,6 +42,22 @@ def clip_by_value(x, clip_value_min, clip_value_max):
 
     Returns:
           Tensor, a clipped Tensor.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
+    Examples:
+        >>> import numpy as np
+        >>> from mindspore import Tensor
+        >>> from mindspore.ops import composite as C
+        >>> import mindspore.common.dtype as mstype
+        >>> min_value = Tensor(5, mstype.float32)
+        >>> max_value = Tensor(20, mstype.float32)
+        >>> x = Tensor(np.array([[1., 25., 5., 7.], [4., 11., 6., 21.]]), mstype.float32)
+        >>> output = C.clip_by_value(x, min_value, max_value)
+        >>> print(output)
+        [[ 5. 20.  5.  7.]
+         [ 5. 11.  6. 20.]]
     """
     min_op = P.Minimum()
     max_op = P.Maximum()
@@ -61,7 +77,9 @@ def _get_square_sum(x):
 apply_global_norm = C.MultitypeFuncGraph("apply_global_norm")
 @apply_global_norm.register("Tensor", "Tensor", "Tensor")
 def _apply_global_norm(clip_norm, global_norm, x):
+    x_dtype = F.dtype(x)
     x = x * clip_norm / global_norm
+    x = F.cast(x, x_dtype)
     return x
 
 

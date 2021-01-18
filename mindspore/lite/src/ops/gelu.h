@@ -31,13 +31,8 @@ class GeLU : public PrimitiveC {
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(GeLU, PrimitiveC);
   explicit GeLU(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
-//  int UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) override;
-//  void SetApproximate(bool approximate);
-#else
-//  int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
+  int UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) override;
 #endif
-  int InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) override;
-  //  bool GetApproximate() const;
 };
 }  // namespace lite
 }  // namespace mindspore

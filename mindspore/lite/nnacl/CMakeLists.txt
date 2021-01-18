@@ -9,13 +9,17 @@ if (PLATFORM_ARM32 OR PLATFORM_ARM64)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -fomit-frame-pointer -fstrict-aliasing -ffunction-sections -fdata-sections -ffast-math")
     endif()
 endif ()
+if ("${X86_64_SIMD}" STREQUAL "avx")
+    set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -msse4.1 -mavx -mavx2")
+    set(CMAKE_C_FLAGS  "${CMAKE_C_FLAGS} -msse4.1 -mavx -mavx2")
+endif ()
 
 ########################### files ###########################
 file(GLOB KERNEL_SRC
     ${NNACL_DIR}/*.c
     ${NNACL_DIR}/fp32/*.c
     ${NNACL_DIR}/int8/*.c
-    ${NNACL_DIR}/quantization/*.c
+    ${NNACL_DIR}/base/*.c
 )
 
 if (SUPPORT_TRAIN)
@@ -39,6 +43,7 @@ endif()
 
 if ("${X86_64_SIMD}" STREQUAL "avx")
     file(GLOB ASSEMBLY_SRC ${NNACL_DIR}/x86_64_sse/*.c
+         ${NNACL_DIR}/x86_64_avx/*.c
          ${NNACL_DIR}/assembly/avx/*.S)
     set_property(SOURCE ${ASSEMBLY_SRC} PROPERTY LANGUAGE C)
 endif()

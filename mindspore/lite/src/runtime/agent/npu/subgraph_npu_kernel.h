@@ -36,7 +36,7 @@ class SubGraphNpuKernel : public SubGraphKernel {
     subgraph_type_ = kNpuSubGraph;
   }
 
-  ~SubGraphNpuKernel() override = default;
+  ~SubGraphNpuKernel() override;
 
   int Init() override;
 
@@ -69,11 +69,7 @@ class SubGraphNpuKernel : public SubGraphKernel {
   std::string GetOMModelName();
 
  private:
-  std::vector<bool> inputs_nhwc2nchw_;
-
-  std::vector<bool> outputs_nchw2nhwc_;
-
-  domi::ModelBufferData *model_buffer_data_;
+  bool is_compiled_ = false;
 
   std::vector<ge::Operator> subgraph_input_op_;
 

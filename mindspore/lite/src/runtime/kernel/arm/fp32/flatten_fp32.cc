@@ -17,7 +17,6 @@
 #include "src/runtime/kernel/arm/fp32/flatten_fp32.h"
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
-#include "nnacl/flatten.h"
 #include "include/errorcode.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
@@ -34,47 +33,14 @@ int FlattenCPUKernel::Init() {
   return ReSize();
 }
 
-int FlattenCPUKernel::ReSize() {
-  auto output_shape = out_tensors_.at(0)->shape();
-  flatten_param_->size = sizeof(float);
-  for (size_t i = 0; i < output_shape.size(); i++) {
-    flatten_param_->size *= output_shape.at(i);
-  }
-  return RET_OK;
-}
+int FlattenCPUKernel::ReSize() { return RET_OK; }
 
 int FlattenCPUKernel::Run() {
-  auto input = reinterpret_cast<float *>(in_tensors_.at(0)->MutableData());
-  auto output = reinterpret_cast<float *>(out_tensors_.at(0)->MutableData());
-  Flatten(input, output, flatten_param_);
+  auto input = in_tensors_.at(0);
+  auto output = out_tensors_.at(0);
+  memcpy(output->data_c(), input->data_c(), output->Size());
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuFlattenFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(opParameter != nullptr);
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Create kernel failed, opParameter is nullptr, type: PrimitiveType_Flatten. ";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_Flatten);
-  auto *kernel = new (std::nothrow) FlattenCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new FlattenCPUKernel fail!";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Flatten, CpuFlattenFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Flatten, LiteKernelCreator<FlattenCPUKernel>)
 }  // namespace mindspore::kernel

@@ -122,7 +122,7 @@ class AscendEnvChecker(EnvChecker):
     """ascend environment check"""
 
     def __init__(self):
-        self.version = ["1.76.T21.0.B210"]
+        self.version = ["1.76.22.1.220"]
         atlas_nnae_version = "/usr/local/Ascend/nnae/latest/fwkacllib/version.info"
         atlas_toolkit_version = "/usr/local/Ascend/ascend-toolkit/latest/fwkacllib/version.info"
         hisi_fwk_version = "/usr/local/Ascend/fwkacllib/version.info"
@@ -206,7 +206,7 @@ class AscendEnvChecker(EnvChecker):
             if process.stdout.strip() != "":
                 logger.warning(process.stdout.strip())
         except subprocess.TimeoutExpired:
-            logger.warning("Package te, topi, hccl version check timed out, skip.")
+            logger.info("Package te, topi, hccl version check timed out, skip.")
 
     def set_env(self):
         if not self.tbe_path:
@@ -216,7 +216,8 @@ class AscendEnvChecker(EnvChecker):
         try:
             # pylint: disable=unused-import
             import te
-        except RuntimeError:
+        # pylint: disable=broad-except
+        except Exception:
             if Path(self.tbe_path).is_dir():
                 if os.getenv('LD_LIBRARY_PATH'):
                     os.environ['LD_LIBRARY_PATH'] = self.tbe_path + ":" + os.environ['LD_LIBRARY_PATH']
@@ -231,7 +232,15 @@ class AscendEnvChecker(EnvChecker):
         self.check_deps_version()
 
         if Path(self.op_impl_path).is_dir():
+            # python path for sub process
+            if os.getenv('PYTHONPATH'):
+                os.environ['PYTHONPATH'] = self.op_impl_path + ":" + os.environ['PYTHONPATH']
+            else:
+                os.environ['PYTHONPATH'] = self.op_impl_path
+            # sys path for this process
             sys.path.append(self.op_impl_path)
+
+            os.environ['TBE_IMPL_PATH'] = self.op_impl_path
         else:
             raise EnvironmentError(
                 f"No such directory: {self.op_impl_path}, Please check if Ascend 910 AI software package is "

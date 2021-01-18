@@ -60,12 +60,8 @@ const std::map<std::string, std::vector<std::string>> kNextOpFormatList = {
 bool MatchInferOutputDataType(const CNodePtr &cnode, const kernel::KernelBuildInfo &kernel_build_info) {
   MS_EXCEPTION_IF_NULL(cnode);
   // Check input data type
-  auto name = AnfAlgo::GetCNodeName(cnode);
   for (size_t input_index = 0; input_index < kernel_build_info.GetInputNum(); ++input_index) {
     TypeId input_origin_type = AnfAlgo::GetPrevNodeOutputInferDataType(cnode, input_index);
-    if ((name == kDynamicRNNOpName || name == kDynamicGRUV2OpName) && input_origin_type == kMetaTypeNone) {
-      continue;
-    }
     if (kernel_build_info.GetInputDeviceType(input_index) != input_origin_type) {
       return false;
     }
@@ -377,7 +373,7 @@ void SetWeightFormat(const AnfNodePtr &real_input_node, const std::vector<string
   }
   if (AnfAlgo::GetOutputDeviceDataType(real_input_node, 0) == kTypeUnknown || is_ref) {
     builder->SetOutputsFormat(output_format);
-    std::vector<TypeId> output_type = {selected_kernel_info->GetInputDeviceType(input_index)};
+    std::vector<TypeId> output_type = {AnfAlgo::GetOutputInferDataType(real_input_node, 0)};
     builder->SetOutputsDeviceType(output_type);
     AnfAlgo::SetSelectKernelBuildInfo(builder->Build(), real_input_node.get());
   }

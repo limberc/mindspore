@@ -93,9 +93,9 @@ namespace device {
 namespace ascend {
 const int FLOAT_LEN = sizeof(float);
 const int FLOAT16_LEN = 2;  // sizeof(float16);
-const std::set<std::string> kOpNeedTransFormat = {kOpFormat_NHWC,        kOpFormat_HWCN,         kOpFormat_NC1HWC0,
-                                                  kOpFormat_FRAC_Z,      kOpFormat_C1HWNCoC0,    kOpFormat_FRAC_NZ,
-                                                  kOpFormat_NC1HWC0_C04, kOpFormat_FRACTAL_Z_C04};
+const std::set<std::string> kOpNeedTransFormat = {kOpFormat_NHWC,        kOpFormat_HWCN,          kOpFormat_NC1HWC0,
+                                                  kOpFormat_FRAC_Z,      kOpFormat_C1HWNCoC0,     kOpFormat_FRAC_NZ,
+                                                  kOpFormat_NC1HWC0_C04, kOpFormat_FRACTAL_Z_C04, kOpFormat_NDC1HWC0};
 
 void SyncMemory(void *dst, const void *src, uint64_t size, rtMemcpyKind_t kind) {
   auto ms_context = MsContext::GetInstance();
@@ -612,7 +612,7 @@ bool AscendDeviceAddress::ConvertFormatAndSyncHostToDevice(const ShapeVector &sh
   return sync_ok;
 }
 
-AscendDeviceAddress::~AscendDeviceAddress() {
+void AscendDeviceAddress::ClearDeviceMemory() {
   if (ptr_ == nullptr) {
     return;
   }
@@ -626,6 +626,8 @@ AscendDeviceAddress::~AscendDeviceAddress() {
     ptr_ = nullptr;
   }
 }
+
+AscendDeviceAddress::~AscendDeviceAddress() { ClearDeviceMemory(); }
 
 bool AscendDeviceAddress::DumpMemToFile(bool trans_flag, const std::string &filepath, const std::string &host_fmt,
                                         const ShapeVector &host_shape, TypeId host_type) const {

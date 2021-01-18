@@ -62,6 +62,30 @@ void ZerosLike(const T *in, T *out, size_t start, size_t end) {
     out[i] = static_cast<T>(0);
   }
 }
+
+template <typename T>
+void Floor(const T *in, T *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    out[i] = static_cast<T>(floor(in[i]));
+  }
+}
+
+template <typename T>
+void Reciprocal(const T *in, T *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    out[i] = static_cast<T>(1.0 / in[i]);
+  }
+}
+
+template <typename T>
+void Gelu(const T *in, T *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    T x = in[i];
+    auto double_x = static_cast<T>(x);
+    T tanh_res = (T)std::tanh(0.7978845608 * (double_x + 0.044715 * double_x * double_x * double_x));
+    out[i] = x * ((T)1.0 + tanh_res) / (T)2.0;
+  }
+}
 }  // namespace
 
 void ArithmeticSelfCPUKernel::InitKernel(const CNodePtr &kernel_node) {
@@ -77,6 +101,12 @@ void ArithmeticSelfCPUKernel::InitKernel(const CNodePtr &kernel_node) {
     operate_type_ = NEG;
   } else if (kernel_name == prim::kPrimSign->name()) {
     operate_type_ = SIGN;
+  } else if (kernel_name == prim::kPrimFloor->name()) {
+    operate_type_ = FLOOR;
+  } else if (kernel_name == prim::kPrimReciprocal->name()) {
+    operate_type_ = RECIPROCAL;
+  } else if (kernel_name == prim::kPrimGelu->name()) {
+    operate_type_ = GELU;
   }
   dtype_ = AnfAlgo::GetPrevNodeOutputInferDataType(kernel_node, 0);
 }
@@ -128,6 +158,12 @@ void ArithmeticSelfCPUKernel::LaunchKernel(const std::vector<AddressPtr> &inputs
       threads.emplace_back(std::thread(ZerosLike<T>, input, output, start, end));
     } else if (operate_type_ == SIGN) {
       threads.emplace_back(std::thread(Sign<T>, input, output, start, end));
+    } else if (operate_type_ == FLOOR) {
+      threads.emplace_back(std::thread(Floor<T>, input, output, start, end));
+    } else if (operate_type_ == RECIPROCAL) {
+      threads.emplace_back(std::thread(Reciprocal<T>, input, output, start, end));
+    } else if (operate_type_ == GELU) {
+      threads.emplace_back(std::thread(Gelu<T>, input, output, start, end));
     }
     start += once_compute_size;
   }

@@ -99,7 +99,8 @@ def connect_network_with_dataset(network, dataset_helper):
     if (hasattr(dataset_iter, "sink_size") and dataset_iter.sink_size == 1) \
             and (hasattr(dataset_iter, "sink_count") and dataset_iter.sink_count == 1) \
             and context.get_context("device_target") == "Ascend" \
-            and context.get_context("mode") == context.GRAPH_MODE:
+            and context.get_context("mode") == context.GRAPH_MODE \
+            and ms_role != "MS_WORKER":
 
         if not hasattr(dataset, '__network__'):
             dataset.__network__ = network
@@ -205,8 +206,12 @@ class DatasetHelper:
         return self.iter.get_sink_size()
 
     def stop_send(self):
-        """Free up resources about data sink."""
+        """stop send data about data sink."""
         self.iter.stop_send()
+
+    def release(self):
+        """Free up resources about data sink."""
+        self.iter.release()
 
     def continue_send(self):
         """continue send data to device at the beginning of epoch."""
@@ -241,6 +246,7 @@ class _DatasetIter:
             _send_data_no_flag(dataset, epoch_num)
 
         self.stop_send = dataset.__transfer_dataset__.stop_send
+        self.release = dataset.__transfer_dataset__.release
         self.continue_send = dataset.__transfer_dataset__.continue_send
         self.get_data_info = dataset.__transfer_dataset__.get_data_info
         self.dataset_types, self.dataset_shapes = _get_types_and_shapes(dataset)
@@ -389,7 +395,7 @@ class _DatasetIterNormal:
         self.dataset = dataset
         self.device_num = _get_device_num()
         self.global_rank = _get_global_rank()
-        self.iter = self.dataset.create_tuple_iterator(num_epochs=epoch_num)
+        self.iter = self.dataset.create_tuple_iterator(num_epochs=epoch_num, do_copy=True)
 
     def __iter__(self):
         return self

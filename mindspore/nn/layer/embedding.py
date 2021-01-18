@@ -33,6 +33,16 @@ from ..cell import Cell
 
 __all__ = ['Embedding', 'EmbeddingLookup', 'MultiFieldEmbeddingLookup']
 
+@constexpr
+def _check_input_2d(input_shape, param_name, func_name):
+    if len(input_shape) != 2:
+        raise ValueError(f"{func_name} {param_name} should be 2d, but got shape {input_shape}")
+    return True
+
+@constexpr
+def _check_input_dtype(input_dtype, param_name, allow_dtypes, cls_name):
+    validator.check_type_name(param_name, input_dtype, allow_dtypes, cls_name)
+
 
 class Embedding(Cell):
     r"""
@@ -91,8 +101,11 @@ class Embedding(Cell):
         if padding_idx is not None:
             self.padding_idx = validator.check_int_range(padding_idx, 0, vocab_size, Rel.INC_BOTH,
                                                          "padding_idx", self.cls_name)
-            self.init_tensor = self.init_tensor.to_tensor().asnumpy()
+            if isinstance(self.init_tensor, Tensor) and self.init_tensor.init is not None:
+                self.init_tensor = self.init_tensor.init_data()
+            self.init_tensor = self.init_tensor.asnumpy()
             self.init_tensor[self.padding_idx] = 0
+            self.init_tensor = Tensor(self.init_tensor)
         self.embedding_table = Parameter(self.init_tensor, name='embedding_table')
         self.expand = P.ExpandDims()
         self.reshape_flat = P.Reshape()
@@ -158,12 +171,16 @@ class EmbeddingLookup(Cell):
         max_norm (Union[float, None]): A maximum clipping value. The data type must be float16, float32
                                        or None. Default: None
         sparse (bool): Using sparse mode. When 'target' is set to 'CPU', 'sparse' has to be true. Default: True.
-        vocab_cache_size (int): Cache size of the dictionary of embeddings.
+        vocab_cache_size (int): Cache size of the dictionary of embeddings. Default: 0. It is valid only in
+            parameter server trainning mode and 'DEVICE' target. And the moment parameter of corresponding
+            optimizer will also be set to the cache size. In addition, it should be noted that it will cost the 'DEVICE'
+            memory, so suggests setting a reasonable value to avoid insufficient memory.
 
     Inputs:
         - **input_indices** (Tensor) - The shape of tensor is :math:`(y_1, y_2, ..., y_S)`.
           Specifies the indices of elements of the original Tensor. Values can be out of range of embedding_table,
-          and the exceeding part will be filled with 0 in the output. Input_indices must only be a 2d tensor in
+          and the exceeding part will be filled with 0 in the output. Values does not support negative and the result
+          is undefined if values are negative. Input_indices must only be a 2d tensor in
           this interface when run in semi auto parallel/auto parallel mode.
 
     Outputs:
@@ -282,7 +299,8 @@ class EmbeddingLookup(Cell):
                                      "in 'full_batch' and 'table_row_slice' parallel strategy.")
                 self.vocab_cache_size = self.vocab_cache_size * device_num
             self.cache_enable = True
-            self.vocab_size = self.vocab_cache_size
+            if _is_role_worker():
+                self.vocab_size = self.vocab_cache_size
 
     def _set_voacb_cache_enable(self, vocab_cache_size, embedding_size, vocab_size):
         """PS embeddingLookup cache enable set."""
@@ -347,17 +365,17 @@ class MultiFieldEmbeddingLookup(EmbeddingLookup):
         operator (string): The pooling method for the features in one field. Support 'SUM, 'MEAN' and 'MAX'
 
     Inputs:
-        - **input_indices** (Tensor) - The shape of tensor is :math:`(batch_size, seq_length)`.
+        - **input_indices** (Tensor) - The shape of tensor is :math:`(batch\_size, seq\_length)`.
           Specifies the indices of elements of the original Tensor. Input_indices must be a 2d tensor in
           this interface. Type is Int32, Int64.
-        - **input_values** (Tensor) - The shape of tensor is :math:`(batch_size, seq_length)`.
+        - **input_values** (Tensor) - The shape of tensor is :math:`(batch\_size, seq\_length)`.
           Specifies the weights of elements of the input_indices. The lookout vector will multiply with
           the input_values. Type is Float32.
-        - **field_ids** (Tensor)  - The shape of tensor is :math:`(batch_size, seq_length)`.
+        - **field_ids** (Tensor)  - The shape of tensor is :math:`(batch\_size, seq\_length)`.
           Specifies the field id of elements of the input_indices. Type is Int32.
 
     Outputs:
-        Tensor, the shape of tensor is :math:`(batch_size, field_size, embedding_size)`. Type is Float32.
+        Tensor, the shape of tensor is :math:`(batch\_size, field\_size, embedding\_size)`. Type is Float32.
 
     Supported Platforms:
         ``Ascend`` ``GPU``
@@ -448,6 +466,13 @@ class MultiFieldEmbeddingLookup(EmbeddingLookup):
         self.negative_inf_value = -3.402823466E+38
 
     def construct(self, input_indices, input_values, field_ids):
+
+        _check_input_2d(F.shape(input_indices), "input_indices", self.cls_name)
+        _check_input_2d(F.shape(input_values), "input_values", self.cls_name)
+        _check_input_2d(F.shape(field_ids), "field_ids", self.cls_name)
+        _check_input_dtype(F.dtype(input_indices), "input_indices", [mstype.int32, mstype.int64], self.cls_name)
+        _check_input_dtype(F.dtype(input_values), "input_values", [mstype.float32], self.cls_name)
+        _check_input_dtype(F.dtype(field_ids), "field_ids", [mstype.int32], self.cls_name)
 
         batch_size = self.shape(input_indices)[0]
         num_segments = batch_size * self.field_size

@@ -70,6 +70,7 @@ void BatchNode::Print(std::ostream &out) const {
 }
 
 Status BatchNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   if (batch_size_ <= 0) {
     std::string err_msg = "BatchNode: batch_size should be positive integer, but got: " + std::to_string(batch_size_);
     MS_LOG(ERROR) << err_msg;
@@ -92,7 +93,7 @@ Status BatchNode::ValidateParams() {
   return Status::OK();
 }
 
-Status BatchNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
+Status BatchNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
 #ifdef ENABLE_PYTHON
   // if col_order_ isn't empty, then a project node needs to be attached after batch node. (same as map)
   // this means project_node needs to be the parent of batch_node. this means *node_ops = [project_node, batch_node]
@@ -141,15 +142,30 @@ Status BatchNode::GetDatasetSize(const std::shared_ptr<DatasetSizeGetter> &size_
 }
 
 // Visitor accepting method for IRNodePass
-Status BatchNode::Accept(IRNodePass *p, bool *modified) {
+Status BatchNode::Accept(IRNodePass *const p, bool *const modified) {
   // Downcast shared pointer then call visitor
   return p->Visit(shared_from_base<BatchNode>(), modified);
 }
 
 // Visitor accepting method for IRNodePass
-Status BatchNode::AcceptAfter(IRNodePass *p, bool *modified) {
+Status BatchNode::AcceptAfter(IRNodePass *const p, bool *const modified) {
   // Downcast shared pointer then call visitor
   return p->VisitAfter(shared_from_base<BatchNode>(), modified);
+}
+
+Status BatchNode::to_json(nlohmann::json *out_json) {
+  nlohmann::json args;
+  args["num_parallel_workers"] = num_workers_;
+  args["batch_size"] = batch_size_;
+  args["drop_remainder"] = drop_remainder_;
+#ifdef ENABLE_PYTHON
+  args["input_columns"] = in_col_names_;
+  args["output_columns"] = out_col_names_;
+  args["column_order"] = col_order_;
+  if (batch_map_func_ != nullptr) args["per_batch_map"] = "pyfunc";
+#endif
+  *out_json = args;
+  return Status::OK();
 }
 }  // namespace dataset
 }  // namespace mindspore

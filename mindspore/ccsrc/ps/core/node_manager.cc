@@ -46,7 +46,6 @@ int NodeManager::NextRankId(const RegisterMessage &register_message) {
     nodes_info_[node_id] = node_info;
     MS_LOG(INFO) << "The server node id:" << node_id << ",node ip: " << node_info.ip_ << ",node port:" << port
                  << " assign rank id:" << rank_id;
-
   } else if (register_message.role() == NodeRole::WORKER) {
     rank_id = ++next_worker_rank_id_;
     NodeInfo node_info;
@@ -65,8 +64,8 @@ void NodeManager::UpdateHeartbeat(const std::string &node_id) {
   struct timeval current_time {};
   (void)gettimeofday(&current_time, nullptr);
   heartbeats_[node_id] = current_time;
-  MS_LOG(INFO) << "The node role: " << CommUtil::NodeRoleToString(node_info.node_role_) << ", the node id:" << node_id
-               << ", the node rank id:" << node_info.rank_id_ << " the current time is: " << current_time.tv_sec;
+  MS_LOG(DEBUG) << "The node role: " << CommUtil::NodeRoleToString(node_info.node_role_) << ", the node id:" << node_id
+                << ", the node rank id:" << node_info.rank_id_ << " the current time is: " << current_time.tv_sec;
 }
 
 void NodeManager::UpdateNodeFinishState(const std::string &node_id) { heartbeats_finish_nodes_.insert(node_id); }
@@ -106,7 +105,7 @@ void NodeManager::UpdateClusterState() {
   }
 
   // 2. update cluster finish state
-  if (finish_nodes_id_.size() == total_node_num_) {
+  if (finish_nodes_id_.size() == total_node_num_ || SizeToInt(finish_nodes_id_.size()) == current_node_num_) {
     is_cluster_finish_ = true;
     is_cluster_ready_ = true;
   }
@@ -120,7 +119,9 @@ void NodeManager::UpdateClusterState() {
 void NodeManager::CheckClusterTimeout() {
   if (total_node_num_ != nodes_info_.size()) {
     MS_LOG(WARNING) << "The cluster is not ready after " << ClusterConfig::cluster_available_timeout()
-                    << " seconds,so finish the cluster";
+                    << " seconds,so finish the cluster, and change total node number from " << total_node_num_ << " to "
+                    << nodes_info_.size();
+    current_node_num_ = nodes_info_.size();
     is_cluster_timeout_ = true;
   }
 }

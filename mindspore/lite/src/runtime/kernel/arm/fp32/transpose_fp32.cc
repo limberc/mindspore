@@ -39,8 +39,13 @@ int TransposeCPUKernel::Init() {
 
 int TransposeCPUKernel::ReSize() {
   TransposeParameter *param = reinterpret_cast<TransposeParameter *>(op_parameter_);
-  if (in_tensors_.at(kInputIndex)->shape().size() != static_cast<size_t>(param->num_axes_)) {
+  if (in_tensors_.at(kInputIndex)->shape().size() != static_cast<size_t>(param->num_axes_) && in_tensors_.size() != 2) {
     return RET_OK;
+  }
+  if (in_tensors_.size() == 2) {
+    auto input_perm = in_tensors_.at(1);
+    MS_ASSERT(input_perm != nullptr);
+    param->num_axes_ = input_perm->ElementsNum();
   }
   auto &inTensor = in_tensors_.front();
   auto &outTensor = out_tensors_.front();
@@ -89,29 +94,42 @@ int TransposeCPUKernel::Run() {
   MS_ASSERT(out_data_);
 
   TransposeParameter *param = reinterpret_cast<TransposeParameter *>(this->op_parameter_);
+  if (in_tensors_.size() == 2) {
+    auto input_perm = in_tensors_.at(1);
+    MS_ASSERT(input_perm != nullptr);
+    MS_ASSERT(input_perm->data_c() != nullptr);
+    int *perm_data = reinterpret_cast<int *>(input_perm->data_c());
+    for (int i = 0; i < input_perm->ElementsNum(); ++i) {
+      param->perm_[i] = perm_data[i];
+    }
+    for (int i = input_perm->ElementsNum(); i <= 8; ++i) {
+      param->perm_[i] = 0;
+    }
+  }
   if (in_tensor->shape().size() != static_cast<size_t>(param->num_axes_)) {
     memcpy(out_data_, in_data_, in_tensor->ElementsNum() * sizeof(float));
     return RET_OK;
   }
+  auto out_shape = out_tensor->shape();
   if (in_tensor->shape().size() == 4 && param->perm_[0] == 0 && param->perm_[1] == 2 && param->perm_[2] == 3 &&
       param->perm_[3] == 1) {
     if (in_tensor->data_type() == kNumberTypeFloat32) {
-      PackNCHWToNHWCFp32(in_tensor->MutableData(), out_tensor->MutableData(), out_tensor->Batch(),
-                         out_tensor->Height() * out_tensor->Width(), out_tensor->Channel());
+      PackNCHWToNHWCFp32(in_tensor->MutableData(), out_tensor->MutableData(), out_shape[0], out_shape[1] * out_shape[2],
+                         out_shape[3]);
     } else if (in_tensor->data_type() == kNumberTypeInt8) {
-      PackNCHWToNHWCInt8(in_tensor->MutableData(), out_tensor->MutableData(), out_tensor->Batch(),
-                         out_tensor->Height() * out_tensor->Width(), out_tensor->Channel());
+      PackNCHWToNHWCInt8(in_tensor->MutableData(), out_tensor->MutableData(), out_shape[0], out_shape[1] * out_shape[2],
+                         out_shape[3]);
     }
     return RET_OK;
   }
   if (in_tensor->shape().size() == 4 && param->perm_[0] == 0 && param->perm_[1] == 3 && param->perm_[2] == 1 &&
       param->perm_[3] == 2) {
     if (in_tensor->data_type() == kNumberTypeFloat32) {
-      PackNHWCToNCHWFp32(in_tensor->MutableData(), out_tensor->MutableData(), out_tensor->Batch(),
-                         out_tensor->Height() * out_tensor->Width(), out_tensor->Channel());
+      PackNHWCToNCHWFp32(in_tensor->MutableData(), out_tensor->MutableData(), out_shape[0], out_shape[2] * out_shape[3],
+                         out_shape[1]);
     } else if (in_tensor->data_type() == kNumberTypeInt8) {
-      PackNHWCToNCHWInt8(in_tensor->MutableData(), out_tensor->MutableData(), out_tensor->Batch(),
-                         out_tensor->Height() * out_tensor->Width(), out_tensor->Channel());
+      PackNHWCToNCHWInt8(in_tensor->MutableData(), out_tensor->MutableData(), out_shape[0], out_shape[2] * out_shape[3],
+                         out_shape[1]);
     }
     return RET_OK;
   }
@@ -152,36 +170,10 @@ int TransposeCPUKernel::Run() {
   return ret;
 }
 
-kernel::LiteKernel *CpuTransposeFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                  const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                  const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                  const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(desc.type == schema::PrimitiveType_Transpose);
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "desc type is not Transpose";
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) TransposeCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "New kernel fails.";
-    free(opParameter);
-    return nullptr;
-  }
-
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Transpose, CpuTransposeFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Transpose, CpuTransposeFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Nchw2Nhwc, CpuTransposeFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Nchw2Nhwc, CpuTransposeFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Nhwc2Nchw, CpuTransposeFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Nhwc2Nchw, CpuTransposeFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Transpose, LiteKernelCreator<TransposeCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Transpose, LiteKernelCreator<TransposeCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Nchw2Nhwc, LiteKernelCreator<TransposeCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Nchw2Nhwc, LiteKernelCreator<TransposeCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Nhwc2Nchw, LiteKernelCreator<TransposeCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Nhwc2Nchw, LiteKernelCreator<TransposeCPUKernel>)
 }  // namespace mindspore::kernel

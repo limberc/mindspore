@@ -55,6 +55,7 @@ FuncGraphPtr TfliteModelParser::Parse(const std::string &model_file, const std::
     return nullptr;
   }
   func_graph_ = std::make_shared<FuncGraph>();
+  func_graph_->set_attr("fmk", MakeValue(static_cast<int>(converter::FmkType_TFLITE)));
 
   auto status = ConvertGraphInputs();
   if (status != RET_OK) {
@@ -76,6 +77,7 @@ FuncGraphPtr TfliteModelParser::Parse(const std::string &model_file, const std::
     ReturnCode::GetSingleReturnCode()->UpdateReturnCode(status);
     return nullptr;
   }
+  func_graph_->set_attr("graph_name", MakeValue("main_graph"));
   return func_graph_;
 }
 
@@ -182,7 +184,7 @@ STATUS TfliteModelParser::ConvertOps() {
 }
 
 STATUS TfliteModelParser::SetTensorQuantParam(const tflite::TensorT *tflite_tensor,
-                                              std::vector<QuantParamT> *quant_params) {
+                                              std::vector<QuantParamT> *quant_params, int round_type) {
   if (tflite_tensor == nullptr) {
     MS_LOG(ERROR) << "tflite_tensor is null, set tensor quant params failed.";
     return RET_NULL_PTR;
@@ -220,6 +222,8 @@ STATUS TfliteModelParser::SetTensorQuantParam(const tflite::TensorT *tflite_tens
       quant_param->max = tflite_tensor->quantization->max[i];
     }
     quant_param->inited = true;
+    quant_param->roundType = round_type;
+    quant_param->multiplier = 1;
     quant_params->emplace_back(*std::move(quant_param));
   }
   return RET_OK;
@@ -235,6 +239,11 @@ STATUS TfliteModelParser::ConvertOpQuantParams(const tflite::OperatorT *op, lite
     MS_LOG(ERROR) << "primitive_c is null, get quant params failed.";
     return RET_NULL_PTR;
   }
+
+  int round_type = 1;
+  if (primitive_c->primitiveT()->value.type == PrimitiveType_Conv2D) {
+    round_type = 2;
+  }
   const auto &tflite_subgraph = tflite_model_->subgraphs.front();
   for (auto input_idx : op->inputs) {
     if (input_idx < 0) {
@@ -242,7 +251,7 @@ STATUS TfliteModelParser::ConvertOpQuantParams(const tflite::OperatorT *op, lite
     }
     const auto &input_tensor = tflite_subgraph->tensors[input_idx];
     std::vector<schema::QuantParamT> quant_params;
-    auto status = SetTensorQuantParam(input_tensor.get(), &quant_params);
+    auto status = SetTensorQuantParam(input_tensor.get(), &quant_params, round_type);
     if (status != RET_OK) {
       MS_LOG(ERROR) << "set input tensor quant param failed.";
       return status;
@@ -255,7 +264,7 @@ STATUS TfliteModelParser::ConvertOpQuantParams(const tflite::OperatorT *op, lite
     }
     const auto &output_tensor = tflite_subgraph->tensors.at(output_idx);
     std::vector<schema::QuantParamT> quant_params;
-    auto status = SetTensorQuantParam(output_tensor.get(), &quant_params);
+    auto status = SetTensorQuantParam(output_tensor.get(), &quant_params, round_type);
     if (status != RET_OK) {
       MS_LOG(ERROR) << "set output tensor quant param failed.";
       return status;

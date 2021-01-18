@@ -9,7 +9,7 @@ set(CCSRC_SRC
 
 include(${TOP_DIR}/cmake/external_libs/glog.cmake)
 
-file(GLOB_RECURSE OPS_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../../src/ops/*.cc
+file(GLOB OPS_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../../src/ops/*.cc
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/ops/populate/*.cc)
 
 file(GLOB_RECURSE CONVERTER_SRC RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -46,6 +46,9 @@ file(GLOB_RECURSE CONVERTER_SRC RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
         ../optimizer/fusion/batchmatmul_fusion.cc
         ../optimizer/fusion/sigmoid_mul_fusion.cc
         ../optimizer/fusion/conv_conv_fusion.cc
+        ../optimizer/fusion/tflite_lstm_cell_fusion.cc
+        ../optimizer/fusion/tf_lstm_cell_fusion.cc
+        ../optimizer/fusion/bidirection_tf_gru_cell_fusion.cc
         ../optimizer/graph/weight_format_transform_pass.cc
         ../optimizer/graph/weight_format_hardcode_pass.cc
         ../optimizer/graph/clip_convert_activation_pass.cc
@@ -59,6 +62,9 @@ file(GLOB_RECURSE CONVERTER_SRC RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
         ../optimizer/graph/slice_prepose_pass.cc
         ../optimizer/graph/mindir_adjust_pass.cc
         ../optimizer/graph/onnx_inputs_adjust_pass.cc
+        ../optimizer/graph/while_pass.cc
+        ../optimizer/graph/if_pass.cc
+        ../optimizer/graph/mindir_inputs_adjust_pass.cc
         )
 
 add_subdirectory(../anf_importer anf_importer)
@@ -87,9 +93,9 @@ set(LITE_SRC
         ${SRC_DIR}/sub_graph_kernel.cc
         ${SRC_DIR}/lite_session.cc
         ${SRC_DIR}/executor.cc
-        ${SRC_DIR}/model.cc
-        ${SRC_DIR}/model_common.cc
+        ${SRC_DIR}/lite_model.cc
         ${SRC_DIR}/errorcode.cc
+        ${SRC_DIR}/dequant.cc
         )
 if (SUPPORT_TRAIN)
     set(LITE_SRC
@@ -103,7 +109,7 @@ file(GLOB KERNEL_SRC
         ${CMAKE_CURRENT_SOURCE_DIR}/../../nnacl/*.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../../nnacl/fp32/*.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../../nnacl/int8/*.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../nnacl/quantization/*.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../nnacl/base/*.c
         ${ARM_DIR}/fp32/*.cc
         ${ARM_DIR}/int8/*.cc
         )

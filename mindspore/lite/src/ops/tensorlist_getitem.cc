@@ -117,6 +117,9 @@ int TensorListGetItem::MergeShape(const std::vector<int> &tmp) {
 }
 
 int TensorListGetItem::InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) {
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
+  }
   auto input0 = reinterpret_cast<TensorList *>(inputs_[0]);
   auto get_index = inputs_[1];
   MS_ASSERT(get_index != nullptr);
@@ -125,16 +128,18 @@ int TensorListGetItem::InferShape(std::vector<lite::Tensor *> inputs_, std::vect
     return RET_ERROR;
   }
   if (get_index->data_c() == nullptr) {
-    MS_LOG(ERROR) << "get_index->data_c() is nullptr";
-    return RET_NULL_PTR;
+    MS_LOG(DEBUG) << "get_index->data_c() is nullptr";
+    return RET_INFER_INVALID;
   }
   index_ = reinterpret_cast<int *>(get_index->data_c())[0];
   if (index_ < 0 || index_ > (input0->ElementsNum() - 1)) {
     MS_LOG(ERROR) << "index_:" << index_ << "must in [0, " << input0->ElementsNum() - 1 << "]";
     return RET_ERROR;
   }
-  auto tensor_index = input0->GetTensorIndex(index_);
-  MS_ASSERT(tensor_index != nullptr);
+  auto tensor_index = input0->GetTensor(index_);
+  if (tensor_index == nullptr) {
+    return RET_INFER_INVALID;
+  }
   auto output = outputs_.front();
   MS_ASSERT(output != nullptr);
   if (tensor_index->data_type() != kTypeUnknown) {
@@ -156,7 +161,7 @@ int TensorListGetItem::InferShape(std::vector<lite::Tensor *> inputs_, std::vect
     }
     if (!IsFullyDefined(element_shape_)) {
       for (int i = 0; i < input0->ElementsNum(); ++i) {
-        auto input = input0->GetTensorIndex(i);
+        auto input = input0->GetTensor(i);
         MS_ASSERT(input != nullptr);
         if (input->data_type() != kTypeUnknown) {
           status = MergeShape(input->shape());

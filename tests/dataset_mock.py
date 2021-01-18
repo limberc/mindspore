@@ -55,13 +55,16 @@ class MindData:
         self.send_epoch_end = send_epoch_end
         return self
 
-    def create_tuple_iterator(self, num_epochs=-1):
+    def create_tuple_iterator(self, num_epochs=-1, do_copy=True):
         return self.__iter__()
 
     def send(self, num_epochs=-1):
         pass
 
     def stop_send(self):
+        pass
+
+    def release(self):
         pass
 
     def continue_send(self):

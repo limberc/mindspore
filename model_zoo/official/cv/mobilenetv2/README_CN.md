@@ -17,7 +17,7 @@
         - [用法](#用法-1)
         - [启动](#启动-1)
         - [结果](#结果-1)
-    - [导出MINDIR](#导出MINDIR)
+    - [模型导出](#模型导出)
 - [模型描述](#模型描述)
     - [性能](#性能)
         - [训练性能](#训练性能)
@@ -58,7 +58,7 @@ MobileNetV2总体网络架构如下：
 - 硬件（Ascend/GPU/CPU）
     - 使用Ascend、GPU或CPU处理器来搭建硬件环境。如需试用Ascend处理器，请发送[申请表](https://obs-9be7.obs.cn-east-2.myhuaweicloud.com/file/other/Ascend%20Model%20Zoo%E4%BD%93%E9%AA%8C%E8%B5%84%E6%BA%90%E7%94%B3%E8%AF%B7%E8%A1%A8.docx)至ascend@huawei.com，审核通过即可获得资源。
 - 框架
-    - [MindSpore](https://www.mindspore.cn/install/en)
+    - [MindSpore](https://www.mindspore.cn/install)
 - 如需查看详情，请参见如下资源：
     - [MindSpore教程](https://www.mindspore.cn/tutorial/training/zh-CN/master/index.html)
     - [MindSpore Python API](https://www.mindspore.cn/doc/api_python/zh-CN/master/index.html)
@@ -188,13 +188,13 @@ epoch time:138331.250, per step time:221.330, avg loss:3.917
 result:{'acc':0.71976314102564111} ckpt=./ckpt_0/mobilenet-200_625.ckpt
 ```
 
-## 导出MINDIR
-
-修改`src/config.py`文件中的`export_mode`和`export_file`, 运行`export.py`。
+## 模型导出
 
 ```shell
-python export.py --platform [PLATFORM] --pretrain_ckpt [CKPT_PATH]
+python export.py --platform [PLATFORM] --ckpt_file [CKPT_PATH] --file_format [EXPORT_FORMAT]
 ```
+
+`EXPORT_FORMAT` 可选 ["AIR", "ONNX", "MINDIR"].
 
 # 模型描述
 
@@ -222,7 +222,7 @@ python export.py --platform [PLATFORM] --pretrain_ckpt [CKPT_PATH]
 
 # 随机情况说明
 
-<!-- [dataset.py](http://dataset.py/)中设置了“create_dataset”函数内的种子，同时还使用了train.py中的随机种子。-->
+<!-- `dataset.py`中设置了“create_dataset”函数内的种子，同时还使用了train.py中的随机种子。-->
 在train.py中，设置了numpy.random、minspore.common.Initializer、minspore.ops.composite.random_ops和minspore.nn.probability.distribution所使用的种子。
 
 # ModelZoo主页

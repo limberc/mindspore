@@ -21,7 +21,7 @@ from ... import context
 from ...common import dtype as mstype
 from ..primitive import PrimitiveWithCheck, PrimitiveWithInfer, prim_attr_register
 from ..operations.math_ops import _infer_shape_reduce
-from ...communication.management import get_rank, GlobalComm, _get_group
+from ...communication.management import GlobalComm
 
 
 class ExtractImagePatches(PrimitiveWithInfer):
@@ -409,7 +409,7 @@ class Send(PrimitiveWithInfer):
     """
     @prim_attr_register
     def __init__(self, sr_tag, dest_rank, group=GlobalComm.WORLD_COMM_GROUP):
-        self.rank = get_rank(_get_group(group))
+        self.rank = dest_rank
         self.sr_tag = sr_tag
         self.group = group
 
@@ -465,7 +465,7 @@ class Receive(PrimitiveWithInfer):
     """
     @prim_attr_register
     def __init__(self, sr_tag, src_rank, shape, dtype, group=GlobalComm.WORLD_COMM_GROUP):
-        self.rank = get_rank(_get_group(group))
+        self.rank = src_rank
         self.tag = sr_tag
         self.shape = shape
         self.dtype = dtype
@@ -679,3 +679,48 @@ class ErrorOnDynamicShapeInput(PrimitiveWithInfer):
 
     def infer_value(self, input_tensor):
         return input_tensor
+
+
+class SequenceMask(PrimitiveWithCheck):
+    """
+    Returns a mask tensor representing the first N positions of each cell.
+
+    If lengths has shape [d_1, d_2, ..., d_n], then the resulting tensor mask has type dtype and shape
+    [d_1, d_2, ..., d_n, maxlen], with mask[i_1, i_2, ..., i_n, j] = (j < lengths[i_1, i_2, ..., i_n])
+
+    Inputs:
+        - **lengths** (Tensor) - Tensor to calculate the mask for. All values in this tensor should be
+          less than or equal to `maxlen`. Values greater than `maxlen` will be treated as `maxlen`.
+          Must be type int32 or int64.
+
+        - **maxlen** (int) - size of the last dimension of returned tensor. Must be positive and same
+          type as elements in `lengths`.
+
+    Outputs:
+        One mask tensor of shape lengths.shape + (maxlen,).
+
+    Supported Platforms:
+        ``GPU``
+
+    Examples:
+        >>> x = Tensor(np.array([[1, 3], [2, 0]]))
+        >>> sequence_mask = ops.SequenceMask()
+        >>> output = sequence_mask(x, 3)
+        >>> print(output)
+        [[[True, False, False],
+          [True, True, True]],
+         [[True, True, False],
+          [False, False, False]]]
+    """
+
+    @prim_attr_register
+    def __init__(self):
+        self.init_prim_io_names(inputs=["lengths", "maxlen"], outputs=["mask"])
+
+    def check_shape(self, lengths_shape, maxlen_shape):
+        validator.check("lengths_shape", len(lengths_shape), "", 0, Rel.GT, self.name)
+        validator.check("maxlen_shape", len(maxlen_shape), "", 0, Rel.EQ, self.name)
+
+    def check_dtype(self, lengths_dtype, maxlen_dtype):
+        validator.check_subclass("lengths_dtype", lengths_dtype, mstype.tensor, self.name)
+        validator.check_subclass("maxlen", maxlen_dtype, mstype.number, self.name)

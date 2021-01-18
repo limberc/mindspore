@@ -1,7 +1,7 @@
 /**
  * This is the C++ adaptation and derivative work of Myia (https://github.com/mila-iqia/myia/).
  *
- * Copyright 2019-2020 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,6 +57,8 @@ AbstractBasePtr InferImplBatchNormGrad(const AnalysisEnginePtr &, const Primitiv
                                        const AbstractBasePtrList &args_spec_list);
 AbstractBasePtr InferImplReluGrad(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
                                   const AbstractBasePtrList &args_spec_list);
+AbstractBasePtr InferImplConv2D(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
+                                const AbstractBasePtrList &args_spec_list);
 AbstractBasePtr InferImplConv2DBackpropInput(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
                                              const AbstractBasePtrList &args_spec_list);
 AbstractBasePtr InferImplConv2DBackpropFilter(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
@@ -205,6 +207,8 @@ AbstractBasePtr InferImplUniqueGrad(const AnalysisEnginePtr &, const PrimitivePt
                                     const AbstractBasePtrList &args_spec_list);
 AbstractBasePtr InferImplUnique(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
                                 const AbstractBasePtrList &args_spec_list);
+AbstractBasePtr InferImplCTCGreedyDecoder(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
+                                          const AbstractBasePtrList &args_spec_list);
 AbstractBasePtr InferImplScatterAdd(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
                                     const AbstractBasePtrList &args_spec_list);
 AbstractBasePtr InferImplScatterUpdate(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
@@ -223,6 +227,10 @@ AbstractBasePtr InferImplUpdateCache(const AnalysisEnginePtr &, const PrimitiveP
                                      const AbstractBasePtrList &args_spec_list);
 AbstractBasePtr InferImplComputeAccidentalHits(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
                                                const AbstractBasePtrList &args_spec_list);
+AbstractBasePtr InferImplPadAndShift(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
+                                     const AbstractBasePtrList &args_spec_list);
+AbstractBasePtr InferImplDynamicAssign(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
+                                       const AbstractBasePtrList &args_spec_list);
 AbstractBasePtr InferImplGatherV2(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
                                   const AbstractBasePtrList &args_spec_list);
 AbstractBasePtr InferImplShape(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
@@ -281,7 +289,12 @@ AbstractBasePtr InferImplSequenceMask(const AnalysisEnginePtr &, const Primitive
                                       const AbstractBasePtrList &args_spec_list);
 AbstractBasePtr InferImplAddN(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
                               const AbstractBasePtrList &args_spec_list);
-
+AbstractBasePtr InferImplRange(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
+                               const AbstractBasePtrList &args_spec_list);
+AbstractBasePtr InferImplMatMul(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
+                                const AbstractBasePtrList &args_spec_list);
+AbstractBasePtr InferImplBatchMatMul(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
+                                     const AbstractBasePtrList &args_spec_list);
 template <typename T>
 AbstractBasePtr InferTupleOrListOrDictLen(const std::string &op_name, const AbstractBasePtrList &args_spec_list) {
   // Inputs: a tuple or list or dict.

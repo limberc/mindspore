@@ -19,26 +19,23 @@
 
 #include <vector>
 #include "src/lite_kernel.h"
-
 #include "include/context.h"
-#include "src/runtime/kernel/arm/base/reshape_base.h"
+#include "nnacl/base/reshape_base.h"
 
 using mindspore::lite::InnerContext;
 
 namespace mindspore::kernel {
-class ReshapeCPUKernel : public ReshapeBaseCPUKernel {
+class ReshapeCPUKernel : public LiteKernel {
  public:
   ReshapeCPUKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
                    const std::vector<lite::Tensor *> &outputs, const InnerContext *ctx,
                    const mindspore::lite::PrimitiveC *primitive)
-      : ReshapeBaseCPUKernel(parameter, inputs, outputs, ctx, primitive) {}
+      : LiteKernel(parameter, inputs, outputs, ctx, primitive) {}
   ~ReshapeCPUKernel() = default;
 
   int Init() override;
   int ReSize() override;
   int Run() override;
-
- private:
 };
 }  // namespace mindspore::kernel
 

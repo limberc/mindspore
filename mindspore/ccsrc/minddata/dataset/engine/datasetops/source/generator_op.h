@@ -93,7 +93,8 @@ class GeneratorOp : public PipelineOp {
   };
 
   GeneratorOp(py::function generator_function, std::vector<std::string> column_names,
-              std::vector<DataType> column_types, int32_t prefetch_size, int32_t buffer_size, int32_t connector_size);
+              std::vector<DataType> column_types, int32_t prefetch_size, int32_t buffer_size, int32_t connector_size,
+              int64_t pre_counter_size = 0);
 
   ~GeneratorOp();
 
@@ -128,7 +129,7 @@ class GeneratorOp : public PipelineOp {
   // @param p - Pointer to the NodePass to be accepted.
   // @param modified - Whether this node visit modified the pipeline.
   // @return - Status of the node visit.
-  Status Accept(NodePass *p, bool *modified) override;
+  Status Accept(NodePass *p, bool *const modified) override;
 
   // Op name getter
   // @return Name of the current Op
@@ -142,6 +143,8 @@ class GeneratorOp : public PipelineOp {
   std::vector<DataType> column_types_;
   int32_t prefetch_size_;
   int32_t buffer_size_;
+  int64_t pre_counter_size_;
+  int64_t generator_counter_;
 
   py::object generator_;
   int32_t buffer_id_;

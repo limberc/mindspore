@@ -74,18 +74,22 @@ bool UnLoadOpenCLLibrary(void *handle) {
   return true;
 }
 
-bool LoadLibraryFromPath(const std::string &library_path, void *handle) {
-  handle = dlopen(library_path.c_str(), RTLD_NOW | RTLD_LOCAL);
-  if (handle == nullptr) {
+bool LoadLibraryFromPath(const std::string &library_path, void **handle_ptr) {
+  if (handle_ptr == nullptr) {
+    return false;
+  }
+
+  *handle_ptr = dlopen(library_path.c_str(), RTLD_NOW | RTLD_LOCAL);
+  if (*handle_ptr == nullptr) {
     return false;
   }
 
 // load function ptr use dlopen and dlsym.
 #define LOAD_OPENCL_FUNCTION_PTR(func_name)                                                    \
-  func_name = reinterpret_cast<func_name##Func>(dlsym(handle, #func_name));                    \
+  func_name = reinterpret_cast<func_name##Func>(dlsym(*handle_ptr, #func_name));               \
   if (func_name == nullptr) {                                                                  \
     MS_LOG(ERROR) << "load func (" << #func_name << ") from (" << library_path << ") failed!"; \
-    UnLoadOpenCLLibrary(handle);                                                               \
+    UnLoadOpenCLLibrary(*handle_ptr);                                                          \
     return false;                                                                              \
   }
 
@@ -138,13 +142,13 @@ bool LoadLibraryFromPath(const std::string &library_path, void *handle) {
   LOAD_OPENCL_FUNCTION_PTR(clEnqueueCopyImage);
   LOAD_OPENCL_FUNCTION_PTR(clEnqueueCopyBufferToImage);
   LOAD_OPENCL_FUNCTION_PTR(clEnqueueCopyImageToBuffer);
-#if CL_HPP_TARGET_OPENCL_VERSION >= 120
+#if CL_TARGET_OPENCL_VERSION >= 120
   LOAD_OPENCL_FUNCTION_PTR(clRetainDevice);
   LOAD_OPENCL_FUNCTION_PTR(clReleaseDevice);
   LOAD_OPENCL_FUNCTION_PTR(clCreateImage);
   LOAD_OPENCL_FUNCTION_PTR(clEnqueueFillImage);
 #endif
-#if CL_HPP_TARGET_OPENCL_VERSION >= 200
+#if CL_TARGET_OPENCL_VERSION >= 200
   LOAD_OPENCL_FUNCTION_PTR(clCreateCommandQueueWithProperties);
   LOAD_OPENCL_FUNCTION_PTR(clGetExtensionFunctionAddress);
   LOAD_OPENCL_FUNCTION_PTR(clSVMAlloc);
@@ -160,13 +164,16 @@ bool LoadLibraryFromPath(const std::string &library_path, void *handle) {
   return true;
 }
 // load default library path
-bool LoadOpenCLLibrary(void *handle) {
-  if (handle != nullptr) {
+bool LoadOpenCLLibrary(void **handle_ptr) {
+  if (handle_ptr == nullptr) {
+    return false;
+  }
+  if (*handle_ptr != nullptr) {
     return true;
   }
-  auto it = std::find_if(
-    g_opencl_library_paths.begin(), g_opencl_library_paths.end(),
-    [&handle](const std::string &lib_path) { return lite::opencl::LoadLibraryFromPath(lib_path, handle); });
+  auto it =
+    std::find_if(g_opencl_library_paths.begin(), g_opencl_library_paths.end(),
+                 [&](const std::string &lib_path) { return lite::opencl::LoadLibraryFromPath(lib_path, handle_ptr); });
   if (it != g_opencl_library_paths.end()) {
     MS_LOG(DEBUG) << "Find a OpenCL dynamic library : " << *it;
     return true;
@@ -225,13 +232,13 @@ CL_DEFINE_FUNC_PTR(clGetEventProfilingInfo);
 CL_DEFINE_FUNC_PTR(clGetImageInfo);
 CL_DEFINE_FUNC_PTR(clEnqueueCopyBufferToImage);
 CL_DEFINE_FUNC_PTR(clEnqueueCopyImageToBuffer);
-#if CL_HPP_TARGET_OPENCL_VERSION >= 120
+#if CL_TARGET_OPENCL_VERSION >= 120
 CL_DEFINE_FUNC_PTR(clRetainDevice);
 CL_DEFINE_FUNC_PTR(clReleaseDevice);
 CL_DEFINE_FUNC_PTR(clCreateImage);
 CL_DEFINE_FUNC_PTR(clEnqueueFillImage);
 #endif
-#if CL_HPP_TARGET_OPENCL_VERSION >= 200
+#if CL_TARGET_OPENCL_VERSION >= 200
 CL_DEFINE_FUNC_PTR(clGetKernelSubGroupInfoKHR);
 CL_DEFINE_FUNC_PTR(clCreateCommandQueueWithProperties);
 CL_DEFINE_FUNC_PTR(clGetExtensionFunctionAddress);
@@ -644,7 +651,7 @@ cl_int clEnqueueCopyImageToBuffer(cl_command_queue command_queue, cl_mem src_ima
               event_wait_list, event);
 }
 
-#if CL_HPP_TARGET_OPENCL_VERSION >= 120
+#if CL_TARGET_OPENCL_VERSION >= 120
 
 // clRetainDevice wrapper, use OpenCLWrapper function.
 cl_int clRetainDevice(cl_device_id device) {
@@ -678,7 +685,7 @@ cl_int clEnqueueFillImage(cl_command_queue command_queue, cl_mem image, const vo
 
 #endif
 
-#if CL_HPP_TARGET_OPENCL_VERSION >= 200
+#if CL_TARGET_OPENCL_VERSION >= 200
 
 // clCreateCommandQueueWithProperties wrapper, use OpenCLWrapper function.
 cl_command_queue clCreateCommandQueueWithProperties(cl_context context, cl_device_id device,

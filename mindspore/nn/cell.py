@@ -23,13 +23,14 @@ import numpy
 
 from mindspore import log as logger
 from mindspore.common.parameter import PARAMETER_NAME_DEFAULT
+from mindspore.context import ParallelMode
 from .. import context
-from .._c_expression import init_backend, Cell_
+from .._c_expression import init_pipeline, Cell_
 from .._checkparam import Validator
 from ..common import dtype as mstype
 from ..common.api import _executor, _pynative_exec
 from ..common.parameter import Parameter, ParameterTuple
-from ..common.tensor import Tensor, MetaTensor
+from ..common.tensor import Tensor
 from ..ops.functional import cast
 from ..ops.operations import HookBackward
 from ..ops.primitive import Primitive
@@ -49,7 +50,7 @@ class Cell(Cell_):
         The bprop implementation will receive a Tensor `dout` containing the gradient of the loss w.r.t.
         the output, and a Tensor `out` containing the forward result. The bprop needs to compute the
         gradient of the loss w.r.t. the inputs, gradient of the loss w.r.t. Parameter variables are not supported
-        currently.
+        currently. The bprop method must contain the self parameter.
 
     Args:
         auto_prefix (bool): Recursively generate namespaces. Default: True.
@@ -68,7 +69,7 @@ class Cell(Cell_):
     """
     IGNORE_LIST = ['_scope', '_cell_init_args', '_auto_prefix', '_cells', '_params', '_construct_inputs_names',
                    '_construct_inputs_num', '_create_time', '_mindspore_flags', '_parallel_inputs_run',
-                   '_parameter_layout_dict', '_already_run', '_params_list', '_tensor_list', '_phase',
+                   '_parameter_layout_dict', '_params_list', '_tensor_list', '_phase',
                    '_auto_parallel_mode', '_backward_hook', '_bprop_debug', '_is_run', '_param_prefix',
                    '_attr_synced', 'enable_hook', 'pynative', 'requires_grad',
                    '_auto_parallel_compile_and_run', 'cell_type']
@@ -90,7 +91,8 @@ class Cell(Cell_):
         self._parameter_layout_dict = {}
         self._create_time = int(time.time() * 1e9)
         self.phase_prefix = ""
-        init_backend()
+        self.parameter_broadcast_done = False
+        init_pipeline()
 
         # call gc to release GE session resources used by non-used cell objects
         if os.getenv('GC_COLLECT_IN_CELL') == '1':
@@ -105,14 +107,8 @@ class Cell(Cell_):
         self._backward_hook = None
         self.enable_hook = False
         self._bprop_debug = False
-        self._already_run = False
         self.cell_type = None
         self._auto_parallel_compile_and_run = False
-        self._support_non_tensor_inputs = False
-
-    @property
-    def already_run(self):
-        return self._already_run
 
     def __getstate__(self):
         base = Cell_.__getstate__(self)
@@ -125,34 +121,9 @@ class Cell(Cell_):
         self._attr_synced = False
 
     @property
-    def support_non_tensor_inputs(self):
-        """
-        Whether support non tensor inputs in outermost net in GRAPH MODE.
-        This property only used in forward net, and is not supported in grad net.
-        The default value of the property is the `False`, that is,
-        it does not support passing non tensor inputs to the outermost net.
-        If you want to support, set the property to the `True`.
-
-        """
-        return self._support_non_tensor_inputs
-
-    @support_non_tensor_inputs.setter
-    def support_non_tensor_inputs(self, value):
-        """
-        Set attr 'support_non_tensor_inputs'.
-        """
-        if not isinstance(value, bool):
-            raise ValueError("When set 'support_non_tensor_inputs' for cell, the value should be bool.")
-        self._support_non_tensor_inputs = value
-
-    @property
     def _cell_tag(self):
         # `<class 'xxxxxxx'>` to `xxxxxxx`
         return str(self.__class__)[8:-2]
-
-    @already_run.setter
-    def already_run(self, value):
-        self._already_run = value
 
     @property
     def create_time(self):
@@ -331,15 +302,18 @@ class Cell(Cell_):
             out = self.compile_and_run(*inputs)
             return out
 
+        if context.get_auto_parallel_context("parallel_mode") == ParallelMode.DATA_PARALLEL:
+            if not self.parameter_broadcast_done:
+                _pynative_exec.parameter_broadcast(self, self.phase, self._auto_parallel_mode)
+                self.parameter_broadcast_done = True
+
         for item in inputs:
             if isinstance(item, numpy.ndarray):
                 raise TypeError("cell inputs should not be numpy array.")
-        origin_grad = []
         if self.requires_grad is True:
             _pynative_exec.set_grad_flag(True)
             _pynative_exec.new_graph(self, *inputs, **kwargs)
             for cell in self.cells():
-                origin_grad.append(cell.requires_grad)
                 cell.set_grad(True)
         else:
             _pynative_exec.set_grad_flag(False)
@@ -352,16 +326,17 @@ class Cell(Cell_):
         if not cast_inputs:
             cast_inputs = inputs
         if self.enable_hook:
+            _pynative_exec.enter_construct(self)
             output = self._hook_construct(*cast_inputs, **kwargs)
+            _pynative_exec.leave_construct(self)
         else:
+            _pynative_exec.enter_construct(self)
             output = self.construct(*cast_inputs, **kwargs)
+            _pynative_exec.leave_construct(self)
         if isinstance(output, Parameter):
             output = output.data
         if self.requires_grad is True:
             _pynative_exec.end_graph(self, output, *inputs, **kwargs)
-            for i, cell in enumerate(self.cells()):
-                cell.set_grad(origin_grad[i])
-            self._already_run = True
         return output
 
     def _add_attr(self, name, value):
@@ -585,7 +560,7 @@ class Cell(Cell_):
 
         new_inputs = []
         for i in inputs:
-            if isinstance(i, (Tensor, MetaTensor)):
+            if isinstance(i, Tensor):
                 new_inputs.append(i)
 
         if self._auto_parallel_mode:
@@ -675,11 +650,6 @@ class Cell(Cell_):
     def construct(self, *inputs, **kwargs):
         """
         Defines the computation to be performed. This method must be overridden by all subclasses.
-
-        Note:
-            The outermost net only supports tensor inputs by default.
-            If want to support non tensor inputs, set the property `support_non_tensor_inputs` to the `True`.
-            Refer to the property `support_non_tensor_inputs` description.
 
         Returns:
             Tensor, returns the computed result.
@@ -909,6 +879,11 @@ class Cell(Cell_):
         """Sets the name on the first time."""
         if self._scope is None:
             self._scope = name
+        elif self._scope == 'recompute':
+            if name is None:
+                self._scope = None
+            elif name != 'recompute':
+                self._scope = self._scope + '_' + name
 
     def _children_scope_recursive(self, parent_prefix='Default'):
         """Generates the scope of each layer of the network recursively."""
@@ -1082,6 +1057,27 @@ class Cell(Cell_):
         params = self.trainable_params(recurse)
         for param in params:
             param.set_param_ps(init_in_server)
+
+    def set_comm_fusion(self, fusion_type, recurse=True):
+        Validator.check_is_int(fusion_type)
+        for param in self.trainable_params(recurse):
+            param.comm_fusion = fusion_type
+        return self
+
+    def recompute(self, mode=True):
+        """
+        Set the cell recomputed. All the primitive in the cell will be set recomputed. If a primitive feeds into a grad
+        node and is set recomputed, we will compute it again for the grad node after the forward computation.
+        Args:
+            mode (bool): Specifies whether the cell is recomputed. Default: True.
+        """
+        Validator.check_bool(mode)
+        if mode is True:
+            self._set_scope("recompute")
+        else:
+            self._set_scope(None)
+        for cell in self.cells():
+            cell.recompute(mode)
 
 
 class GraphKernel(Cell):

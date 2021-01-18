@@ -19,6 +19,7 @@
 
 using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
+using mindspore::lite::RET_NULL_PTR;
 using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_LayerNorm;
 
@@ -90,6 +91,10 @@ int LayerNormInt8CPUKernel::ReSize() {
     op_parameter_ = nullptr;
   }
   op_parameter_ = PopulateLayerNormParameter(primitive_);
+  if (op_parameter_ == nullptr) {
+    MS_LOG(ERROR) << "op_parameter_ is nullptr!";
+    return RET_NULL_PTR;
+  }
   op_parameter_->thread_num_ = context_->thread_num_;
   param_ = reinterpret_cast<LayerNormParameter *>(op_parameter_);
   auto shape = in_tensors_.front()->shape();
@@ -141,25 +146,5 @@ int LayerNormInt8CPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuLayerNormInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                  const std::vector<lite::Tensor *> &outputs, OpParameter *parameter,
-                                                  const lite::InnerContext *ctx, const KernelKey &desc,
-                                                  const mindspore::lite::PrimitiveC *primitive) {
-  auto *kernel = new (std::nothrow) LayerNormInt8CPUKernel(parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "kernel is nullptr.";
-    free(parameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << parameter->name_
-                  << ", type: " << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(parameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_LayerNorm, CpuLayerNormInt8KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_LayerNorm, LiteKernelCreator<LayerNormInt8CPUKernel>)
 }  // namespace mindspore::kernel

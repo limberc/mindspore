@@ -164,8 +164,11 @@ class Optimizer(Cell):
         self.param_length = len(self.parameters)
         self.map_ = C.Map()
         if context.get_auto_parallel_context("enable_parallel_optimizer"):
-            if _get_parallel_mode() == ParallelMode.DATA_PARALLEL:
+            if _get_parallel_mode() == ParallelMode.DATA_PARALLEL and context.get_context("device_target") == "Ascend":
                 self.use_parallel = True
+            elif _get_parallel_mode() == ParallelMode.DATA_PARALLEL \
+                    and context.get_context("device_target") != "Ascend":
+                raise RuntimeError("Parallel optimizer only supports Ascend in data parallel mode.")
             elif _get_parallel_mode() in (ParallelMode.STAND_ALONE, ParallelMode.HYBRID_PARALLEL):
                 raise RuntimeError("Parallel optimizer is not supported in {}.".format(_get_parallel_mode()))
             else:
@@ -174,10 +177,10 @@ class Optimizer(Cell):
             self.use_parallel = False
         if self.use_parallel:
             if self.cls_name not in ["Lamb", "AdamWeightDecay"]:
-                raise RuntimeError("Optimizer segmentation does not support optimizer {}".format(self.cls_name))
+                raise RuntimeError("Parallel optimizer does not support optimizer {}".format(self.cls_name))
             self.dev_num = _get_device_num()
             if self.dev_num > self.param_length:
-                raise RuntimeError("Optimizer segmentation can not be applied when the number of parameters {} is"
+                raise RuntimeError("Parallel optimizer can not be applied when the number of parameters {} is"
                                    " less than the number of devices {}".format(self.param_length, self.dev_num))
             self.param_rank = self._get_parameter_group_id()
             self.optim_filter = tuple(map(lambda x: x == _get_global_rank(), self.param_rank))
@@ -257,7 +260,7 @@ class Optimizer(Cell):
         return gradients
 
     def _grad_sparse_indices_deduplicate(self, gradients):
-        """ In the case of using big operators, de duplicate the 'indexes' in gradients."""
+        """ In the case of using big operators, deduplicate the 'indexes' in gradients."""
         if self._target != 'CPU' and self._unique:
             gradients = self.map_(F.partial(_indices_deduplicate), gradients)
         return gradients
@@ -276,17 +279,17 @@ class Optimizer(Cell):
             learning_rate = float(learning_rate)
             validator.check_non_negative_float(learning_rate, "learning rate", self.cls_name)
             return learning_rate
-        if isinstance(learning_rate, Tensor) and learning_rate.dim() == 0:
+        if isinstance(learning_rate, Tensor) and learning_rate.ndim == 0:
             return learning_rate
 
         self.dynamic_lr = True
         if isinstance(learning_rate, Iterable):
             return Tensor(np.array(list(learning_rate)).astype(np.float32))
         if isinstance(learning_rate, Tensor):
-            if learning_rate.dim() > 1:
+            if learning_rate.ndim > 1:
                 raise ValueError("The dim of `Tensor` type Learning rate should be a 0 or 1,"
-                                 f"but got {learning_rate.dim()}.")
-            if learning_rate.dim() == 1 and learning_rate.size() < 2:
+                                 f"but got {learning_rate.ndim}.")
+            if learning_rate.ndim == 1 and learning_rate.size < 2:
                 logger.warning("If use `Tensor` type dynamic learning rate, please make sure that the number"
                                "of elements in the tensor passed is greater than 1.")
             return learning_rate
@@ -301,12 +304,12 @@ class Optimizer(Cell):
             if self.is_group_lr and self.dynamic_lr:
                 learning_rate = _ConvertToCell(learning_rate)
             return learning_rate
-        if isinstance(learning_rate, Tensor) and learning_rate.dim() == 0:
+        if isinstance(learning_rate, Tensor) and learning_rate.ndim == 0:
             learning_rate = Parameter(learning_rate, name)
             if self.is_group_lr and self.dynamic_lr:
                 learning_rate = _ConvertToCell(learning_rate)
             return learning_rate
-        if isinstance(learning_rate, Tensor) and learning_rate.dim() == 1:
+        if isinstance(learning_rate, Tensor) and learning_rate.ndim == 1:
             return _IteratorLearningRate(learning_rate, name)
         return learning_rate
 
@@ -336,8 +339,8 @@ class Optimizer(Cell):
     def _parse_group_params(self, parameters, learning_rate):
         """Parse group params."""
         self._check_group_params(parameters)
-        if isinstance(learning_rate, Tensor) and learning_rate.dim() == 1:
-            tensor_lr_length = learning_rate.size()
+        if isinstance(learning_rate, Tensor) and learning_rate.ndim == 1:
+            tensor_lr_length = learning_rate.size
         else:
             tensor_lr_length = 0
 
@@ -355,8 +358,8 @@ class Optimizer(Cell):
                 self.is_group_lr = True
                 group_lr = self._preprocess_single_lr(group_param['lr'])
 
-                if isinstance(group_lr, Tensor) and group_lr.dim() == 1:
-                    group_lr_length = group_lr.size()
+                if isinstance(group_lr, Tensor) and group_lr.ndim == 1:
+                    group_lr_length = group_lr.size
                     if tensor_lr_length == 0:
                         tensor_lr_length = group_lr_length
                     elif group_lr_length != tensor_lr_length:
@@ -615,9 +618,9 @@ class _IteratorLearningRate(LearningRateSchedule):
     def __init__(self, learning_rate, name):
         super(_IteratorLearningRate, self).__init__()
         if isinstance(learning_rate, Tensor):
-            if learning_rate.dim() != 1:
+            if learning_rate.ndim != 1:
                 raise ValueError("The dim of `Tensor` type dynamic learning rate should be a 1,"
-                                 f"but got {learning_rate.dim()}.")
+                                 f"but got {learning_rate.ndim}.")
         else:
             raise TypeError("Learning rate should be Tensor.")
 

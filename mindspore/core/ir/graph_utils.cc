@@ -61,7 +61,7 @@ std::vector<AnfNodePtr> TopoSort(const AnfNodePtr &root, const SuccFunc &succ, c
     node->seen_ = seen;
     if (incl == FOLLOW) {
       auto succs = succ(node);
-      (void)std::copy_if(succs.begin(), succs.end(), std::back_inserter(todo), [seen, todo](const AnfNodePtr &next) {
+      (void)std::copy_if(succs.begin(), succs.end(), std::back_inserter(todo), [seen, &todo](const AnfNodePtr &next) {
         if (next == nullptr || next->extra_seen_ == seen) {
           return false;
         }
@@ -77,12 +77,12 @@ std::vector<AnfNodePtr> TopoSort(const AnfNodePtr &root, const SuccFunc &succ, c
         auto circle_node_it = std::find(todo.begin(), todo.end(), next);
         for (; circle_node_it != todo.end(); circle_node_it++) {
           auto circle_node = *circle_node_it;
-          if (circle_node->seen_) {
+          if (circle_node->seen_ == seen) {
             MS_LOG(ERROR) << "#" << pos << ": " << circle_node->DebugString();
             pos++;
           }
         }
-        MS_LOG(EXCEPTION) << "Graph cycle exists, node " << next->DebugString(2);
+        MS_LOG(EXCEPTION) << "Graph cycle exists, strike node: " << next->DebugString(2);
       });
     } else if (incl > EXCLUDE) {  // Not NOFOLLOW or EXCLUDE
       MS_LOG(EXCEPTION) << "The result of include(node) must be one of: \"follow\", \"nofollow\", \"exclude\"";

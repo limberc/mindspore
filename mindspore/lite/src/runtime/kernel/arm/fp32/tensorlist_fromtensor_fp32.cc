@@ -59,9 +59,19 @@ int TensorListFromTensorCPUKernel::Init() {
   return IsCompatibleShape();
 }
 
-int TensorListFromTensorCPUKernel::ReSize() { return RET_OK; }
+int TensorListFromTensorCPUKernel::ReSize() {
+  auto ret = this->Init();
+  if (ret != RET_OK) {
+    MS_LOG(ERROR) << "Init kernel failed!";
+    return ret;
+  }
+  return RET_OK;
+}
 
 int TensorListFromTensorCPUKernel::Run() {
+  input0_ = in_tensors_[0];  // row tensor
+  input1_ = in_tensors_[1];  // element_shape tensor
+  output0_ = out_tensors_[0];
   if (input0_->shape().size() == 0) {
     MS_LOG(ERROR) << "input0_->shape().size():" << input0_->shape().size() << " must be greater than 0";
   }
@@ -79,7 +89,7 @@ int TensorListFromTensorCPUKernel::Run() {
   auto in_ptr = reinterpret_cast<float *>(input0_->data_c());
   // copy data from input0(tensor) to output(tensorlist) vector<*tensor>
   for (int i = 0; i < dim0; ++i) {
-    auto out_ptr = output0->GetTensorIndex(i);
+    auto out_ptr = output0->GetTensor(i);
     MS_ASSERT(out_ptr != nullptr);
     if (out_ptr->ElementsNum() != devision_dim0) {
       MS_LOG(ERROR) << "tensors_[" << i << "].ElementsNum():" << out_ptr->ElementsNum()
@@ -114,15 +124,9 @@ kernel::LiteKernel *CpuTensorListFromTensorFp32KernelCreator(const std::vector<l
     free(op_parameter);
     return nullptr;
   }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed! name: " << op_parameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(op_parameter->type_));
-    delete kernel;
-    return nullptr;
-  }
   return kernel;
 }
 
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_TensorListFromTensor, CpuTensorListFromTensorFp32KernelCreator)
 REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_TensorListFromTensor, CpuTensorListFromTensorFp32KernelCreator)
 }  // namespace mindspore::kernel

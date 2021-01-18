@@ -52,45 +52,63 @@ struct PrimAbsInfo {
 
 using AbstractListMap = std::unordered_map<abstract::AbstractBasePtrList, PrimAbsInfo,
                                            abstract::AbstractBasePtrListHasher, abstract::AbstractBasePtrListEqual>;
+using OpIndexWithTensorId = std::unordered_map<std::string, std::vector<std::string>>;
+using TensorIdWithTensor = std::unordered_map<std::string, std::vector<tensor::TensorPtr>>;
 
-py::tuple RunOp(const py::args &args);
+py::object RunOp(const py::args &args);
 
 void ClearPyNativeSession();
 
 struct GraphInfo {
   std::string cell_id;
   AnfNodePtr output;
-  std::unordered_map<std::string, ParameterPtr> params;  // hold input parameters and cell weigths
+  OrderedMap<std::string, ParameterPtr> params;  // hold input parameters and cell weigths
   std::unordered_map<std::string, std::pair<AnfNodePtr, std::vector<int64_t>>> node_map;
   std::vector<std::string> objects;
   GraphInfo() = default;
   explicit GraphInfo(std::string id) : cell_id(std::move((id))) {}
 };
 
-struct CellInfo {
-  bool is_grad{false};          // Derivative is calculated
-  bool is_custom_bprop{false};  // Custom bprop
-  FuncGraphPtr fg;              // Forward graph
-  std::string cell_id;
-  std::string bprop_cell_id;
+class CellInfo {
+ public:
   CellInfo() = default;
-  CellInfo(bool isgrad, bool custom_bprop, FuncGraphPtr foward_graph, std::string cellid, std::string bprop_id)
-      : is_grad(isgrad),
-        is_custom_bprop(custom_bprop),
+  CellInfo(bool custom_bprop, bool has_dynamic, FuncGraphPtr foward_graph, std::string cellid, std::string bprop_id)
+      : is_custom_bprop(custom_bprop),
+        is_dynamic(has_dynamic),
         fg(std::move(foward_graph)),
         cell_id(std::move(cellid)),
         bprop_cell_id(std::move(bprop_id)) {}
+
+  bool is_grad{false};          // Derivative is calculated
+  bool is_custom_bprop{false};  // Custom bprop
+  bool is_dynamic{false};       // Set by has_dynamic_cell
+  bool is_real_dynamic{false};  // Set by ops order
+  size_t call_times{0};
+  FuncGraphPtr fg{nullptr};  // Forward graph
+  std::string cell_id;
+  std::string bprop_cell_id;
+  std::vector<std::string> cell_ops_info;  // All ops info
 };
 
-struct TopCellInfo {
-  ResourcePtr resource;
-  FuncGraphPtr df_builder;
-  FuncGraphPtr bg;  // Backward graph
-  std::string cell_id;
+class TopCellInfo {
+ public:
   TopCellInfo() = default;
-  TopCellInfo(ResourcePtr r, FuncGraphPtr df, FuncGraphPtr backward_graph, std::string cellid)
-      : resource(std::move(r)), df_builder(std::move(df)), bg(std::move(backward_graph)), cell_id(std::move(cellid)) {}
+  TopCellInfo(bool topest, ResourcePtr r, FuncGraphPtr df, std::string cellid)
+      : is_topest(topest), resource(std::move(r)), df_builder(std::move(df)), cell_id(std::move(cellid)) {}
+
+  bool is_topest{false};
+  bool do_vm_compiled{false};
+  ResourcePtr resource{nullptr};
+  FuncGraphPtr df_builder{nullptr};
+  FuncGraphPtr bg{nullptr};  // Backward graph
+  std::string cell_id;
+  std::string sens_id;
+  std::string weights_id;
 };
+
+using GraphInfoPtr = std::shared_ptr<GraphInfo>;
+using CellInfoPtr = std::shared_ptr<CellInfo>;
+using TopCellInfoPtr = std::shared_ptr<TopCellInfo>;
 
 class PynativeExecutor : public std::enable_shared_from_this<PynativeExecutor> {
  public:
@@ -108,15 +126,20 @@ class PynativeExecutor : public std::enable_shared_from_this<PynativeExecutor> {
   bool need_replace_forward() const { return need_replace_forward_; }
   bool grad_flag() const { return grad_flag_; }
   void set_grad_flag(bool flag) { grad_flag_ = flag; }
+  void EnterConstruct(const py::object &cell);
+  void LeaveConstruct(const py::object &cell);
 
-  py::tuple RunOpInner(const OpExecInfoPtr &op_exec_info);
+  py::object RunOpInner(const OpExecInfoPtr &op_exec_info);
   OpExecInfoPtr GenerateOpExecInfo(const py::args &args);
   void NewGraph(const py::object &cell, const py::args &args);
   py::object Run(const py::object &cell, const py::tuple &args, const py::object &phase);
   py::object CheckGraph(const py::object &cell, const py::args &args);
+  py::object CheckAlreadyRun(const py::object &cell, const py::args &args);
   void EndGraph(const py::object &cell, const py::object &out, const py::args &args);
   void GradNet(const GradOperationPtr &grad, const py::object &cell, const py::object &weights, const py::args &args);
 
+  // Get info
+  bool GetIsDynamicCell() { return CheckRealDynamicCell(top_cell_id_); }
   // Call by python
   void Clear(const std::string &flag = "");
   void Clean();
@@ -142,7 +165,7 @@ class PynativeExecutor : public std::enable_shared_from_this<PynativeExecutor> {
   template <typename T>
   void VectorClear(T *vec, const std::string &cell_id) {
     for (auto it = vec->begin(); it != vec->end();) {
-      if (it->cell_id.find(cell_id) != std::string::npos) {
+      if ((*it)->cell_id.find(cell_id) != std::string::npos) {
         it = vec->erase(it);
       } else {
         it++;
@@ -154,9 +177,12 @@ class PynativeExecutor : public std::enable_shared_from_this<PynativeExecutor> {
   bool IsDynamicCell(const py::object &cell);
   std::string GetCellInfo(const py::object &cell);
   void ParseInputArgs(const std::shared_ptr<parse::ParseAst> &ast, const py::object &fn_node);
-  bool ParseBodyContext(const std::shared_ptr<parse::ParseAst> &ast, const py::object &fn_node);
+  bool ParseBodyContext(const std::shared_ptr<parse::ParseAst> &ast, const py::object &fn_node,
+                        const std::vector<std::string> &compare_prim = {});
   bool ParseIfWhileExprNode(const std::shared_ptr<parse::ParseAst> &ast, const py::object &node);
   bool ParseAssignExprNode(const std::shared_ptr<parse::ParseAst> &ast, const py::object &node);
+  bool ParseAugAssignExprNode(const std::shared_ptr<parse::ParseAst> &ast, const py::object &node,
+                              const std::vector<std::string> &compare_prim = {});
   bool ParseForExprNode(const std::shared_ptr<parse::ParseAst> &ast, const py::object &node);
   std::string ParseNodeName(const std::shared_ptr<parse::ParseAst> &ast, const py::object &node,
                             parse::AstMainType type);
@@ -190,28 +216,41 @@ class PynativeExecutor : public std::enable_shared_from_this<PynativeExecutor> {
   // Update the abstract and device address info of value node and tensors in bprop graph
   void UpdateAbstractAndDeviceAddress(const OpExecInfoPtr &op_exec_info, const py::object &out_real);
   void SaveTensorsInValueNode(const ResourcePtr &resource);
-  void CleanTensorsInValueNode();
+  void SaveAllValueNodeTensors(const FuncGraphPtr &graph);
+  void CleanPreMemoryInValueNode();
 
   // Construct grad graph
   void PushCurrentGraphToStack();
   void PopGraphStack();
+  void PushCurrentCellOpInfoToStack();
+  void PopCurrentCellOpInfoFromStack();
   FuncGraphPtr GetDfbuilder(const std::string &cell_id = "");
   ResourcePtr GetResource(const std::string &cell_id = "");
   void AddNestedGradOrder() { ++grad_order_; }
   void SubNestedGradOrder();
-  bool IsNotNestedGrad() const;
+  bool IsNestedGrad() const;
   bool IsTopGraph(const std::string &cell_id);
+  bool IsTopestGraph(const std::string &cell_id);
   bool IsBpropGraph(const std::string &cell_id);
+  bool IsFirstGradStep(const std::string &cell_id);
   bool grad_running() const { return grad_is_running_; }
   void set_grad_runing(bool grad_runing) { grad_is_running_ = grad_runing; }
   void set_need_replace_forward(bool need_replace_forward) { need_replace_forward_ = need_replace_forward; }
   bool need_construct_graph() { return !graph_stack_.empty() && grad_flag_; }
   bool CheckCellGraph(const std::string &cell_id, bool is_grad = false);
+  bool CheckDynamicCell(const std::string &cell_id);
+  bool CheckRealDynamicCell(const std::string &cell_id);
   void UpdateCellGraph(const py::object &cell, const FuncGraphPtr &g, const std::string &cell_id,
                        bool need_cloned = false, bool is_grad = false);
+  void ClearCnodeRes(const AnfNodePtr &node, std::unordered_set<AnfNodePtr> *node_set);
+  void UpdateCellDynamic(const std::string &cell_id);
+  bool CheckCellChanged(const std::string &cell_id);
+  void UpdateTopCellInfo(const std::string &cell_id, bool vm_compiled);
   void ClearResidualRes(const std::string &cell_id);
+  void DumpGraphIR(const std::string &filename, const FuncGraphPtr &graph);
   void NewGraphInner(const py::object &cell, const py::args &args);
-  void MakeNewTopGraph(const string &cell_id, const py::args &args, const FuncGraphPtr &g);
+  void MakeNewTopGraph(const string &cell_id, const py::args &args);
+  std::string GetTopCell(const string &cell_id);
   void EndGraphInner(const py::object &cell, const py::object &out, const py::args &args);
   void EndGraphByOutId(const py::object &cell, const std::string &cell_id, const py::object &out,
                        const std::string &out_id, const py::args &args);
@@ -220,37 +259,44 @@ class PynativeExecutor : public std::enable_shared_from_this<PynativeExecutor> {
                              const std::string &cell_id, const py::args &args);
   std::string GetGradCellId(bool has_sens, const py::object &cell, const py::args &args, py::object *forward_args,
                             py::object *sens = nullptr);
+  void ClearDynamicTopRes(const std::string &cell_id);
   void GradNetInner(const GradOperationPtr &grad, const py::object &cell, const py::object &weights,
                     const py::args &args);
   std::string GetCellId(const py::object &obj, const py::args &args);
-  std::pair<bool, bool> CheckCellChanged(const std::string &cell_id, const py::object &weights, const py::object &sens);
+  std::string GetTensorCellId(const std::string &cell_id);
+  bool CheckGradParamsChanged(const std::string &cell_id, const py::object &weights, const py::object &sens);
   void SetGradGraphParams(const FuncGraphPtr &df_builder, const ResourcePtr &resource, size_t size);
   void GradGraph(const FuncGraphPtr &g, const GradOperationPtr &grad_op, const std::vector<AnfNodePtr> &weights,
                  size_t arg_size, const std::string &cell_id);
   std::vector<AnfNodePtr> GetWeightsArgs(const py::object &weights, const FuncGraphPtr &df_builder);
   abstract::AbstractBasePtrList GetArgsSpec(const py::args &args, const FuncGraphPtr &df_builder);
-  void UpdateGraphInfoMap(const std::string &cell_id);
+  void ClearUselessRes(const FuncGraphPtr &df_builder, const py::object &cell, const std::string &cell_id);
+  void ReplaceGraphParams(const FuncGraphPtr &df_builder, const FuncGraphPtr &forward_graph,
+                          const std::string &cell_id);
   void SetNestedTopGraph(const py::object &cell, const py::args &args, const std::string &cell_id);
   void MakeNestedCnode(const std::string &cell_id, const py::args &args, const ResourcePtr &resource,
                        const py::object &out, bool has_sens);
+  void RecoverGraphParams(const FuncGraphPtr &newfg, const std::string &cell_id, std::vector<AnfNodePtr> *inputs);
   bool MakeBpropNestedCnode(const py::object &cell, const py::object &out, const std::string &cell_id);
 
   // Hold graph(forward and grad) info
+  std::string GetCellOpInfo();
+  void ReplaceCellOpInfoByCellId(const std::string &cell_id);
   void SetPyObjInGraphInfoMap(const FuncGraphPtr &g, const std::string &obj) {
-    graph_info_map_[g].objects.push_back(obj);
+    graph_info_map_[g]->objects.push_back(obj);
   }
   void SetTupleArgsToGraphInfoMap(const FuncGraphPtr &g, const py::object &args, const AnfNodePtr &node,
                                   bool is_param = false);
   void SetParamNodeMapInGraphInfoMap(const FuncGraphPtr &g, const std::string &id, const ParameterPtr &param) {
-    graph_info_map_[g].params.emplace(std::make_pair(id, param));
+    graph_info_map_[g]->params[id] = param;
   }
   void SetNodeMapInGraphInfoMap(const FuncGraphPtr &g, const std::string &id, const AnfNodePtr &node,
                                 int64_t index = -1) {
-    graph_info_map_[g].node_map[id] = std::make_pair(node, std::vector<int64_t>{index});
+    graph_info_map_[g]->node_map[id] = std::make_pair(node, std::vector<int64_t>{index});
   }
   void SetNodeMapInGraphInfoMap(const FuncGraphPtr &g, const std::string &id, const AnfNodePtr &node,
                                 const std::vector<int64_t> &index) {
-    graph_info_map_[g].node_map[id] = std::make_pair(node, index);
+    graph_info_map_[g]->node_map[id] = std::make_pair(node, index);
   }
   void SetTupleItemArgsToGraphInfoMap(const FuncGraphPtr &g, const py::object &id, const AnfNodePtr &node,
                                       const std::vector<int64_t> &index_sequence, bool is_param = false);
@@ -259,33 +305,42 @@ class PynativeExecutor : public std::enable_shared_from_this<PynativeExecutor> {
   static std::mutex instance_lock_;
   static int64_t graph_id_;
   size_t grad_order_{0};
+  std::string top_cell_id_;
   bool grad_flag_{false};
-  bool dynamic_cell_{false};
+  bool in_grad_process_{false};
+  bool has_dynamic_cell_{false};
   bool grad_is_running_{false};
   bool need_replace_forward_{true};
+  // The pointer of top python Cell object, which is always the network(inherit class Cell) ran in python test script,
+  // such as Resnet50(Cell),LeNet(Cell).This pointer is used to distinguish temporary primitives from global
+  // primitives to control memory release. Global primitives are always created in top cell's '__init__' function and
+  // temporary primitives are always created in other place.Temporary primitives will be released after executing top
+  // cell's 'construct' function but global primitives will not.
+  PyObject *top_cell_{nullptr};
 
   // Used for construct grad graph
   FuncGraphPtr curr_g_{nullptr};
   // Records forwrad graph, the bottom is top graph
   std::stack<FuncGraphPtr> graph_stack_;
+  // Records op info of every cell, the bottom is op info of top cell
+  std::stack<std::string> cell_op_info_stack_;
 
-  std::unordered_set<std::string> cell_input_args_;
-  std::unordered_map<std::string, bool> cell_dynamic_map_;
-  // Record all info for all cells
-  std::unordered_map<FuncGraphPtr, GraphInfo> graph_info_map_;
   // Use vector for keep order
-  std::vector<CellInfo> cell_graph_list_;
-  std::vector<TopCellInfo> top_cell_list_;
-  // key: cell_id, value: (send_id, weighs_id), cache for sens and weight change
-  std::unordered_map<std::string, std::pair<std::string, std::string>> cell_sw_map_;
+  std::vector<CellInfoPtr> cell_graph_list_;
+  std::vector<TopCellInfoPtr> top_cell_list_;
+  std::unordered_set<std::string> cell_input_args_;
+  // Record all info for all cells
+  OrderedMap<FuncGraphPtr, GraphInfoPtr> graph_info_map_;
+  std::unordered_map<FuncGraphPtr, std::vector<std::pair<ParameterPtr, ParameterPtr>>> replace_weights_map_;
 
   // Used for runop and replace forward result of grad graph
   std::unordered_map<std::string, size_t> op_index_map_;
   std::unordered_map<std::string, std::string> obj_to_forward_id_;
-  std::unordered_map<std::string, std::vector<std::string>> op_index_with_tensor_id_;
-  std::unordered_map<std::string, std::vector<tensor::TensorPtr>> tensor_id_with_tensor_;
+  std::unordered_map<std::string, OpIndexWithTensorId> cell_op_index_with_tensor_id_;
+  std::unordered_map<std::string, TensorIdWithTensor> cell_tensor_id_with_tensor_;
   std::unordered_map<std::string, abstract::AbstractBasePtr> node_abs_map_;
   std::unordered_map<std::string, AbstractListMap> prim_abs_list_;
+  std::unordered_set<tensor::TensorPtr> all_value_node_tensors_;
 };
 
 using PynativeExecutorPtr = std::shared_ptr<PynativeExecutor>;

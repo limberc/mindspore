@@ -43,12 +43,6 @@ int ConvolutionWinogradFP16CPUKernel::InitWeightBias() {
   int oc_block_num = UP_DIV(out_channel, C8NUM);
 
   // init weight
-  auto ret = ConvolutionBaseFP16CPUKernel::GetExecuteFilter();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Get Execute filter failed.";
-    return ret;
-  }
-
   // set data
   auto trans_matrix_data_size = input_unit_ * input_unit_ * in_channel * oc_block_num * oc_block * sizeof(float16_t);
   trans_weight_ = reinterpret_cast<float16_t *>(malloc(trans_matrix_data_size));
@@ -68,19 +62,16 @@ int ConvolutionWinogradFP16CPUKernel::InitWeightBias() {
   if (input_unit_ == 8) {
     coef = 0.5f;
   }
-  ret = CookToomFilter(matrix_a, matrix_at, matrix_b, matrix_bt, matrix_g, matrix_gt, coef, output_unit_, kernel_unit_);
+  auto ret =
+    CookToomFilter(matrix_a, matrix_at, matrix_b, matrix_bt, matrix_g, matrix_gt, coef, output_unit_, kernel_unit_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "get matrix g from CookToomFilter failed.";
     return ret;
   }
-  ret = WinogradFilterTransformFp16(execute_weight_, matrix_g, matrix_gt, oc_block);
+  ret = WinogradFilterTransformFp16(fp16_origin_weight_, matrix_g, matrix_gt, oc_block);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "winograd filter transfrom failed.";
     return ret;
-  }
-  if (fp16_weight_ != nullptr) {
-    free(fp16_weight_);
-    fp16_weight_ = nullptr;
   }
 
   // init bias
@@ -92,10 +83,7 @@ int ConvolutionWinogradFP16CPUKernel::InitWeightBias() {
   memset(bias_data_, 0, oc_block_num * oc_block * sizeof(float16_t));
   auto fp16_bias_data = reinterpret_cast<float16_t *>(bias_data_);
   if (in_tensors_.size() == kInputSize2) {
-    auto ori_bias = reinterpret_cast<float *>(in_tensors_.at(kBiasIndex)->MutableData());
-    for (int i = 0; i < out_channel; ++i) {
-      fp16_bias_data[i] = (float16_t)ori_bias[i];
-    }
+    memcpy(fp16_bias_data, fp16_bias_, out_channel * sizeof(float16_t));
   } else {
     MS_ASSERT(in_tensors_.size() == kInputSize1);
   }
@@ -162,15 +150,13 @@ int ConvolutionWinogradFP16CPUKernel::Init() {
   input_unit_ = output_unit_ + kernel_unit_ - 1;
   conv_param_->input_unit_ = input_unit_;
   conv_param_->output_unit_ = output_unit_;
+
   auto ret = InitWeightBias();
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Init weight bias failed.";
     return RET_ERROR;
   }
-  if (!InferShapeDone()) {
-    return RET_OK;
-  }
-  return ReSize();
+  return RET_OK;
 }
 
 int ConvolutionWinogradFP16CPUKernel::ReSize() {
@@ -179,17 +165,11 @@ int ConvolutionWinogradFP16CPUKernel::ReSize() {
     MS_LOG(ERROR) << "Resize is invalid.";
     return ret;
   }
-
   ret = ConvolutionBaseCPUKernel::Init();
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "ConvolutionBase init failed.";
     return RET_ERROR;
   }
-  kernel_unit_ = conv_param_->kernel_h_;
-  input_unit_ = output_unit_ + kernel_unit_ - 1;
-  conv_param_->input_unit_ = input_unit_;
-  conv_param_->output_unit_ = output_unit_;
-
   ret = ConfigInputOutput();
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "ConfigInputOutput failed.";
@@ -215,17 +195,11 @@ static int ConvolutionWinogradFp16Impl(void *cdata, int task_id) {
 }
 
 int ConvolutionWinogradFP16CPUKernel::Run() {
-  auto ret = ConvolutionBaseFP16CPUKernel::GetExecuteTensor();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Get Execute tensor failed.";
-    ConvolutionBaseFP16CPUKernel::FreeTmpBuffer();
-    return ret;
-  }
+  ConvolutionBaseFP16CPUKernel::GetExecuteTensor();
 
-  ret = InitTmpBuffer();
+  auto ret = InitTmpBuffer();
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Init tmp buffer failed.";
-    ConvolutionBaseFP16CPUKernel::FreeTmpBuffer();
     FreeTmpBuffer();
     return RET_ERROR;
   }
@@ -235,8 +209,6 @@ int ConvolutionWinogradFP16CPUKernel::Run() {
     MS_LOG(ERROR) << "conv winograd error error_code[" << ret << "]";
   }
 
-  ConvolutionBaseFP16CPUKernel::IfCastOutput();
-  ConvolutionBaseFP16CPUKernel::FreeTmpBuffer();
   FreeTmpBuffer();
   return ret;
 }

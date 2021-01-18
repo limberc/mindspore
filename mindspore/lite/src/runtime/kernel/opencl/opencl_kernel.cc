@@ -15,7 +15,7 @@
  */
 
 #include "src/runtime/kernel/opencl/opencl_kernel.h"
-#include "src/runtime/kernel/arm/base/dequant.h"
+#include "mindspore/lite/src/dequant.h"
 
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
@@ -69,6 +69,57 @@ int OpenCLKernel::GetImageSize(size_t idx, std::vector<size_t> *img_size) {
   size_t img_dtype = ocl_runtime_->GetFp16Enable() ? CL_HALF_FLOAT : CL_FLOAT;
   *img_size = {img_info.width, img_info.height, img_dtype};
   return RET_OK;
+}
+
+void OpenCLKernel::PrintOutput(int print_num, const std::string &out_file) {
+  printf("%-30s", name().c_str());
+  if (out_tensors().empty()) {
+    return;
+  }
+  auto *tensor = out_tensors()[0];
+  auto mem_type = GetMemType();
+  if (tensor == nullptr || tensor->data_c() == nullptr) {
+    return;
+  }
+
+  GpuTensorInfo img_info(tensor);
+  auto size = mem_type == lite::opencl::MemType::BUF ? img_info.OriginSize : img_info.Image2DSize;
+  std::vector<char> data(size);
+  auto runtime_wrapper = lite::opencl::OpenCLRuntimeWrapper();
+  auto runtime = runtime_wrapper.GetInstance();
+  auto allocator = runtime->GetAllocator();
+  runtime->SyncCommandQueue();
+  if (mem_type == lite::opencl::MemType::BUF) {
+    allocator->MapBuffer(tensor->data_c(), CL_MAP_READ, nullptr, true);
+    memcpy(data.data(), tensor->data_c(), img_info.OriginSize);
+    allocator->UnmapBuffer(tensor->data_c());
+  } else {
+    runtime->ReadImage(tensor->data_c(), data.data());
+  }
+
+  printf("shape=(");
+  auto shape = tensor->shape();
+  for (int i = 0; i < shape.size(); ++i) {
+    printf("%4d", shape[i]);
+    if (i + 1 < shape.size()) {
+      printf(",");
+    }
+  }
+  printf(") ");
+
+  auto total_num = mem_type == lite::opencl::MemType::BUF ? img_info.ElementsNum : img_info.ElementsC4Num;
+  for (int i = 0; i < print_num && i < total_num; ++i) {
+    if (tensor->data_type() == kNumberTypeFloat16) {
+      printf("%d %7.3f | ", i, reinterpret_cast<float16_t *>(data.data())[i]);
+    } else {
+      printf("%d %7.3f | ", i, reinterpret_cast<float *>(data.data())[i]);
+    }
+  }
+  printf("\n");
+
+  if (!out_file.empty()) {
+    (void)WriteToBin(out_file, data.data(), data.size());
+  }
 }
 
 int OpenCLKernel::PostProcess() {
@@ -203,18 +254,20 @@ std::set<size_t> OpenCLKernel::GenerateLocalByGlobal(size_t global_i) {
 int OpenCLKernel::DequantWeight() {
   bool is_fp16 = ocl_runtime_->GetFp16Enable();
   auto *weight_tensor = in_tensors_.at(kWeightIndex);
-  auto *restore_data = weight_tensor->data_c();
-  dequant_flag_ =
-    !weight_tensor->quant_params().empty() && weight_tensor->quant_params().front().inited && restore_data != nullptr;
+  restore_quant_data_ = weight_tensor->data_c();
+  dequant_flag_ = !weight_tensor->quant_params().empty() && weight_tensor->quant_params().front().inited &&
+                  restore_quant_data_ != nullptr;
   if (dequant_flag_) {
     void *dequant_weight{nullptr};
     bool set_flag{true};
     if (is_fp16) {
 #ifdef ENABLE_ARM64
       if (in_tensors_.at(kWeightIndex)->data_type() == kNumberTypeInt8) {
-        dequant_weight = kernel::DequantUtil::DequantData<int8_t, float16_t>(weight_tensor);
+        dequant_weight = lite::DequantUtil::DequantData<int8_t, float16_t>(weight_tensor);
+        weight_tensor->set_data_type(kNumberTypeFloat16);
       } else if (in_tensors_.at(kWeightIndex)->data_type() == kNumberTypeInt16) {
-        dequant_weight = kernel::DequantUtil::DequantData<int16_t, float16_t>(weight_tensor);
+        dequant_weight = lite::DequantUtil::DequantData<int16_t, float16_t>(weight_tensor);
+        weight_tensor->set_data_type(kNumberTypeFloat16);
       } else {
         set_flag = false;
       }
@@ -223,9 +276,11 @@ int OpenCLKernel::DequantWeight() {
 #endif
     } else {
       if (in_tensors_.at(kWeightIndex)->data_type() == kNumberTypeInt8) {
-        dequant_weight = kernel::DequantUtil::DequantData<int8_t, float>(weight_tensor);
+        dequant_weight = lite::DequantUtil::DequantData<int8_t, float>(weight_tensor);
+        weight_tensor->set_data_type(kNumberTypeFloat32);
       } else if (in_tensors_.at(kWeightIndex)->data_type() == kNumberTypeInt16) {
-        dequant_weight = kernel::DequantUtil::DequantData<int16_t, float>(weight_tensor);
+        dequant_weight = lite::DequantUtil::DequantData<int16_t, float>(weight_tensor);
+        weight_tensor->set_data_type(kNumberTypeFloat32);
       } else {
         set_flag = false;
       }
@@ -242,6 +297,7 @@ void OpenCLKernel::FreeDequantedWeight() {
   auto *weight_tensor = in_tensors_.at(kWeightIndex);
   if (dequant_flag_) {
     free(weight_tensor->data_c());
+    weight_tensor->set_data(restore_quant_data_);
   }
 }
 }  // namespace mindspore::kernel

@@ -1,5 +1,5 @@
 /**
- * Copyright 2019-2020 Huawei Technologies Co., Ltd
+ * Copyright 2019-2021 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -103,6 +103,8 @@ inline const PrimitivePtr kPrimMapCacheIdx = std::make_shared<Primitive>("MapCac
 inline const PrimitivePtr kPrimUpdateCache = std::make_shared<Primitive>("UpdateCache");
 inline const PrimitivePtr kPrimComputeAccidentalHits = std::make_shared<Primitive>("ComputeAccidentalHits");
 inline const PrimitivePtr kPrimCacheSwapTable = std::make_shared<Primitive>("CacheSwapTable");
+inline const PrimitivePtr kPrimDynamicAssign = std::make_shared<Primitive>("DynamicAssign");
+inline const PrimitivePtr kPrimPadAndShift = std::make_shared<Primitive>("PadAndShift");
 inline const PrimitivePtr kPrimSlice = std::make_shared<Primitive>("Slice");
 inline const PrimitivePtr kPrimTile = std::make_shared<Primitive>("Tile");
 inline const PrimitivePtr kPrimAddN = std::make_shared<Primitive>("AddN");
@@ -123,6 +125,7 @@ inline const PrimitivePtr kPrimScatterUpdate = std::make_shared<Primitive>("Scat
 inline const PrimitivePtr kPrimMapUniform = std::make_shared<Primitive>("MapUniform");
 inline const PrimitivePtr kPrimSplit = std::make_shared<Primitive>("Split");
 inline const PrimitivePtr kPrimSequenceMask = std::make_shared<Primitive>("SequenceMask");
+inline const PrimitivePtr kPrimRange = std::make_shared<Primitive>("Range");
 
 // NN
 inline const PrimitivePtr kPrimFlatten = std::make_shared<Primitive>("Flatten");
@@ -158,6 +161,7 @@ inline const PrimitivePtr kPrimConv2DBackpropFilter = std::make_shared<Primitive
 inline const PrimitivePtr kPrimConv3DBackpropInput = std::make_shared<Primitive>("Conv3DBackpropInput");
 inline const PrimitivePtr kPrimConv3DBackpropFilter = std::make_shared<Primitive>("Conv3DBackpropFilter");
 inline const PrimitivePtr kPrimDepthwiseConv2dNative = std::make_shared<Primitive>("DepthwiseConv2dNative");
+inline const PrimitivePtr kPrimCTCGreedyDecoder = std::make_shared<Primitive>("CTCGreedyDecoder");
 inline const PrimitivePtr kPrimDepthwiseConv2dNativeBackpropFilter =
   std::make_shared<Primitive>("DepthwiseConv2dNativeBackpropFilter");
 inline const PrimitivePtr kPrimDepthwiseConv2dNativeBackpropInput =
@@ -200,9 +204,11 @@ inline const PrimitivePtr kPrimFusedAdam = std::make_shared<Primitive>("FusedAda
 inline const PrimitivePtr kPrimFusedAdamWeightDecay = std::make_shared<Primitive>("FusedAdamWeightDecay");
 inline const PrimitivePtr kPrimSGD = std::make_shared<Primitive>("SGD");
 inline const PrimitivePtr kPrimClipByNormNoDivSum = std::make_shared<Primitive>("ClipByNormNoDivSum");
+inline const PrimitivePtr kPrimTensorMove = std::make_shared<Primitive>("TensorMove");
 
 // Comm ops
 inline const PrimitivePtr kPrimMirror = std::make_shared<Primitive>("_MirrorOperator");
+inline const PrimitivePtr kPrimMirrorMiniStep = std::make_shared<Primitive>("_MirrorMiniStepOperator");
 inline const PrimitivePtr kPrimVirtualDiv = std::make_shared<Primitive>("_VirtualDiv");
 inline const PrimitivePtr kPrimVirtualDataset = std::make_shared<Primitive>("_VirtualDataset");
 inline const PrimitivePtr kPrimSend = std::make_shared<Primitive>("Send");
@@ -242,6 +248,8 @@ inline const PrimitivePtr kPrimNeg = std::make_shared<Primitive>("Neg");
 inline const PrimitivePtr kPrimSub = std::make_shared<Primitive>("Sub");
 inline const PrimitivePtr kPrimMul = std::make_shared<Primitive>("Mul");
 inline const PrimitivePtr kPrimDiv = std::make_shared<Primitive>("Div");
+inline const PrimitivePtr kPrimMod = std::make_shared<Primitive>("Mod");
+inline const PrimitivePtr kPrimFloor = std::make_shared<Primitive>("Floor");
 inline const PrimitivePtr kPrimDivNoNan = std::make_shared<Primitive>("DivNoNan");
 inline const PrimitivePtr kPrimMinimum = std::make_shared<Primitive>("Minimum");
 inline const PrimitivePtr kPrimMaximum = std::make_shared<Primitive>("Maximum");
@@ -253,6 +261,7 @@ inline const PrimitivePtr kPrimInplaceAdd = std::make_shared<Primitive>("Inplace
 inline const PrimitivePtr kPrimInplaceSub = std::make_shared<Primitive>("InplaceSub");
 inline const PrimitivePtr kPrimPow = std::make_shared<Primitive>("Pow");
 inline const PrimitivePtr kPrimRealDiv = std::make_shared<Primitive>("RealDiv");
+inline const PrimitivePtr kPrimFloorDiv = std::make_shared<Primitive>("FloorDiv");
 inline const PrimitivePtr kPrimSqrt = std::make_shared<Primitive>("Sqrt");
 inline const PrimitivePtr kPrimSqrtGrad = std::make_shared<Primitive>("SqrtGrad");
 inline const PrimitivePtr kPrimReciprocal = std::make_shared<Primitive>("Reciprocal");
@@ -265,6 +274,7 @@ inline const PrimitivePtr kPrimRsqrt = std::make_shared<Primitive>("Rsqrt");
 inline const PrimitivePtr kPrimSplitV = std::make_shared<Primitive>("SplitV");
 inline const PrimitivePtr kPrimLinSpace = std::make_shared<Primitive>("LinSpace");
 inline const PrimitivePtr kPrimSign = std::make_shared<Primitive>("Sign");
+inline const PrimitivePtr kPrimSquaredDifference = std::make_shared<Primitive>("SquaredDifference");
 
 // Statements
 inline const PrimitivePtr kPrimReturn = std::make_shared<Primitive>("return");
@@ -302,6 +312,7 @@ inline const PrimitivePtr kPrimErrorOnDynamicShapeInput = std::make_shared<Primi
 
 // Other miscellaneous
 inline const PrimitivePtr kPrimDepend = std::make_shared<Primitive>("Depend");
+inline const PrimitivePtr kPrimReformat = std::make_shared<Primitive>("Reformat");
 inline const PrimitivePtr kPrimPartial = std::make_shared<Primitive>("Partial");
 inline const PrimitivePtr kPrimIdentity = std::make_shared<Primitive>("identity");
 inline const PrimitivePtr kPrimHookBackward = std::make_shared<Primitive>("HookBackward");

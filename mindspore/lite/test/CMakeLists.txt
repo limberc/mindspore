@@ -30,7 +30,7 @@ file(GLOB KERNEL_OP_SRC
         ${LITE_DIR}/nnacl/*.c
         ${LITE_DIR}/nnacl/fp32/*.c
         ${LITE_DIR}/nnacl/int8/*.c
-        ${LITE_DIR}/nnacl/quantization/*.c
+        ${LITE_DIR}/nnacl/base/*.c
         )
 
 file(GLOB KERNEL_OP_TRAIN_SRC
@@ -75,7 +75,10 @@ if ("${X86_64_SIMD}" STREQUAL "sse")
 endif()
 
 if ("${X86_64_SIMD}" STREQUAL "avx")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse4.1 -mavx -mavx2")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -msse4.1 -mavx -mavx2")
     file(GLOB TEST_ASSEMBLY_SRC ${LITE_DIR}/nnacl/x86_64_sse/*.c
+             ${LITE_DIR}/nnacl/x86_64_avx/*.c
              ${LITE_DIR}/nnacl/assembly/avx/*.S)
     set_property(SOURCE ${TEST_ASSEMBLY_SRC} PROPERTY LANGUAGE C)
     set(KERNEL_OP_SRC
@@ -105,7 +108,8 @@ if (PLATFORM_ARM32 OR PLATFORM_ARM64)
   endif()
 endif()
 ### runtime framework
-file(GLOB_RECURSE OPS_SRC ${LITE_DIR}/src/ops/*.cc ${LITE_DIR}/src/ops/populate/*.cc)
+add_definitions(-DENABLE_V0)
+file(GLOB_RECURSE OPS_SRC ${LITE_DIR}/src/ops/*.cc)
 set(TEST_LITE_SRC
         ${TEST_LITE_SRC}
         ${CCSRC_SRC}
@@ -122,9 +126,9 @@ set(TEST_LITE_SRC
         ${LITE_DIR}/src/kernel_registry.cc
         ${LITE_DIR}/src/lite_kernel.cc
         ${LITE_DIR}/src/lite_session.cc
+        ${LITE_DIR}/src/dequant.cc
         ${LITE_DIR}/src/sub_graph_kernel.cc
-        ${LITE_DIR}/src/model.cc
-        ${LITE_DIR}/src/model_common.cc
+        ${LITE_DIR}/src/lite_model.cc
         ${LITE_DIR}/src/scheduler.cc
         ${LITE_DIR}/src/common/graph_util.cc
         ${LITE_DIR}/src/common/file_utils.cc
@@ -187,6 +191,9 @@ if(ENABLE_CONVERTER)
             ${LITE_DIR}/tools/optimizer/fusion/sigmoid_mul_fusion.cc
             ${LITE_DIR}/tools/optimizer/fusion/conv_conv_fusion.cc
             ${LITE_DIR}/tools/optimizer/fusion/conv_tuplegetitem_fusion.cc
+            ${LITE_DIR}/tools/optimizer/fusion/tflite_lstm_cell_fusion.cc
+            ${LITE_DIR}/tools/optimizer/fusion/tf_lstm_cell_fusion.cc
+            ${LITE_DIR}/tools/optimizer/fusion/bidirection_tf_gru_cell_fusion.cc
             ${LITE_DIR}/tools/optimizer/graph/weight_format_transform_pass.cc
             ${LITE_DIR}/tools/optimizer/graph/weight_format_hardcode_pass.cc
             ${LITE_DIR}/tools/optimizer/graph/clip_convert_activation_pass.cc
@@ -199,7 +206,10 @@ if(ENABLE_CONVERTER)
             ${LITE_DIR}/tools/optimizer/graph/infershape_pass.cc
             ${LITE_DIR}/tools/optimizer/graph/slice_prepose_pass.cc
             ${LITE_DIR}/tools/optimizer/graph/mindir_adjust_pass.cc
+            ${LITE_DIR}/tools/optimizer/graph/mindir_inputs_adjust_pass.cc
             ${LITE_DIR}/tools/optimizer/graph/onnx_inputs_adjust_pass.cc
+            ${LITE_DIR}/tools/optimizer/graph/while_pass.cc
+            ${LITE_DIR}/tools/optimizer/graph/if_pass.cc
             )
 endif()
 ### train
@@ -279,15 +289,19 @@ if (SUPPORT_GPU)
 endif()
 
 if (ENABLE_FP16)
+    file(GLOB_RECURSE TEST_CASE_KERNEL_FP16_SRC
+            ${TEST_DIR}/ut/src/runtime/kernel/arm/fp16/*.cc
+            )
     set(TEST_SRC
             ${TEST_SRC}
-            ${TEST_DIR}/ut/src/runtime/kernel/arm/fp16/convolution_fp16_tests.cc)
+            ${TEST_CASE_KERNEL_FP16_SRC}
+            )
 endif ()
 
 add_executable(lite-test ${TEST_SRC})
 add_dependencies(lite-test fbs_src)
 target_link_libraries(lite-test dl mindspore::gtest)
-if (PLATFORM_ARM64)
+if (PLATFORM_ARM64 AND ENABLE_FP16)
     target_link_libraries(lite-test nnacl_fp16_mid nnacl_optimize_mid)
 endif()
 

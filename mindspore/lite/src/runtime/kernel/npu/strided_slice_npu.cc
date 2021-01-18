@@ -27,9 +27,9 @@ int StridedSliceNPUKernel::IsSupport(const std::vector<lite::Tensor *> &inputs,
   // Only onnx StridedSlice has 5 inputs, of which the 4th input is axes and the 5th input is strides.
   if (inputs.size() == 5) {
     vector<int> axes;
-    size_t size = inputs[4]->shape()[0];
+    size_t size = inputs[3]->shape()[0];
     axes.resize(size);
-    memcpy(axes.data(), inputs[4]->data_c(), sizeof(int) * size);
+    memcpy(axes.data(), inputs[3]->data_c(), sizeof(int) * size);
     for (int i = 0; i < axes.size(); ++i) {
       if (i != axes[i]) {
         MS_LOG(ERROR) << "Does not support setting axis, so the axis must be continuous.";
@@ -59,11 +59,11 @@ int StridedSliceNPUKernel::SetNPUInputs(const std::vector<lite::Tensor *> &input
   } else {
     op_->set_input_strides(*npu_inputs[3]);
   }
-  op_->set_attr_begin_mask(begin_mask_);
-  op_->set_attr_ellipsis_mask(ellipsis_mask_);
-  op_->set_attr_end_mask(end_mask_);
-  op_->set_attr_shrink_axis_mask(shrink_axis_mask_);
-  op_->set_attr_new_axis_mask(new_axis_mask_);
+  op_->set_attr_begin_mask(strided_slice_->GetBeginMask());
+  op_->set_attr_ellipsis_mask(strided_slice_->GetEllipsisMask());
+  op_->set_attr_end_mask(strided_slice_->GetEndMask());
+  op_->set_attr_shrink_axis_mask(strided_slice_->GetShrinkAxisMask());
+  op_->set_attr_new_axis_mask(strided_slice_->GetNewAxisMask());
   return RET_OK;
 }
 
@@ -77,4 +77,5 @@ StridedSliceNPUKernel::~StridedSliceNPUKernel() {
 }
 
 REG_KERNEL(kNPU, kNumberTypeFloat32, PrimitiveType_StridedSlice, NPUKernelCreator<StridedSliceNPUKernel>)
+REG_KERNEL(kNPU, kNumberTypeInt32, PrimitiveType_StridedSlice, NPUKernelCreator<StridedSliceNPUKernel>)
 }  // namespace mindspore::kernel

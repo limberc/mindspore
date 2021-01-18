@@ -130,6 +130,46 @@ Status OperatorInfo::InferAttrs() {
   return SUCCESS;
 }
 
+Status OperatorInfo::InferMirrorOps() {
+  mirror_ops_.clear();
+  if (inputs_shape_.empty()) {
+    MS_LOG(INFO) << name_ << ": The inputs size is empty";
+    return SUCCESS;
+  }
+
+  if (inputs_tensor_map_.size() != inputs_shape_.size()) {
+    MS_LOG(ERROR) << name_ << ": The size of inputs tensor map is not equal to the size of inputs shape";
+    return FAILED;
+  }
+
+  bool group_is_empty = true;
+  for (size_t i = 0; i < inputs_tensor_map_.size(); ++i) {
+    std::vector<Group> group;
+    if (CreateGroupByTensorMap(inputs_tensor_map_[i], &group) != SUCCESS) {
+      MS_LOG(ERROR) << name_ << ": Create group failed, the input index is " << i;
+      mirror_ops_.clear();
+      return FAILED;
+    }
+
+    OperatorVector mirror_op;
+    if (group.empty()) {
+      MS_LOG(INFO) << name_ << ": The mirror group is empty, the input index is " << i;
+      mirror_ops_.push_back(mirror_op);
+      continue;
+    }
+
+    group_is_empty = false;
+    mirror_op = CreateMirrorOps(group[0].name(), group[0].GetDevNum());
+    mirror_ops_.push_back(mirror_op);
+  }
+
+  if (group_is_empty) {
+    mirror_ops_.clear();
+    MS_LOG(INFO) << name_ << ": No need to insert mirror ops";
+  }
+  return SUCCESS;
+}
+
 Status OperatorInfo::InferRepeatedCalcInfo() {
   int64_t g_dev_list_size = stage_device_size_;
   int64_t dev_matrix_size =
@@ -285,8 +325,8 @@ OperatorVector CreateMirrorOps(const std::string &group_name, size_t dev_num) {
   }
   OperatorVector op_for_weight;
   bool mean_flag = ParallelContext::GetInstance()->gradients_mean();
+  int64_t grad_accumulation_step = ParallelContext::GetInstance()->grad_accumulation_step();
 
-  OperatorName operator_name = MIRROR_OPERATOR;
   ValuePtr attr0_value = MakeValue(group_name);
   ValuePtr attr1_value = MakeValue(SizeToLong(dev_num));
   ValuePtr attr2_value = MakeValue(mean_flag);
@@ -299,6 +339,17 @@ OperatorVector CreateMirrorOps(const std::string &group_name, size_t dev_num) {
   operator_attrs.push_back(attr0);
   operator_attrs.push_back(attr1);
   operator_attrs.push_back(attr2);
+
+  OperatorName operator_name;
+  if (grad_accumulation_step > 1) {
+    operator_name = MIRROR_MINI_STEP_OPERATOR;
+    ValuePtr attr3_value = MakeValue(grad_accumulation_step);
+    Attr attr3 = std::make_pair(GRAD_ACCUMULATION_STEP, attr3_value);
+    operator_attrs.push_back(attr3);
+    MS_LOG(INFO) << "The grad accumulation step is " << grad_accumulation_step << ", use mini step mirror";
+  } else {
+    operator_name = MIRROR_OPERATOR;
+  }
 
   OperatorParams operator_param;
   OperatorArgs operator_args = std::make_pair(operator_attrs, operator_param);
@@ -1204,6 +1255,20 @@ int64_t OperatorInfo::ComputeOpAndPrevEdgeParameterInvolved() {
   } else {
     is_output_parameter_involve_ = 0;
   }
+  // Set 'is_parameter_involve_' and 'is_output_parameter_involve_' into operatorCost, which are used in
+  // calculating 'inputs_in_memory' and 'output_in_memory', respectively.
+  operator_cost()->set_is_parameter_involve(is_parameter_involve_);
+  operator_cost()->set_output_parameter_involve(is_output_parameter_involve_);
+  // Calculating 'output_in_memory'
+  operator_cost()->CalculateOutputInMemory();
+  // Calculating 'inputs_in_memory'
+  std::map<size_t, bool> input_in_memory;
+  for (auto &p_edge : prev_edges) {
+    auto input_index = p_edge->next_op_input_index();
+    auto is_in_mem = p_edge->prev_operator()->operator_cost()->is_output_in_memory();
+    input_in_memory.emplace(std::make_pair(input_index, is_in_mem));
+  }
+  operator_cost()->CalculateInputsInMemory(input_in_memory);
 
   return is_output_parameter_involve_;
 }
@@ -1220,14 +1285,10 @@ Status OperatorInfo::set_is_parameter(const std::vector<bool> &is_parameter) {
 }
 
 Status OperatorInfo::CalculateMemoryCost() {
-  // First, set the 'is_parameter_involve_' and 'is_output_parameter_involve_' into OperatorCost, which are necessary to
-  // calculate memory cost.
   if (is_parameter_involve_.size() != is_parameter_.size()) {
     MS_LOG(ERROR) << "'is_parameter_' does not have the same number of input size of 'is_parameter_involve_'.";
     return FAILED;
   }
-  operator_cost()->set_is_parameter_involve(is_parameter_involve_);
-  operator_cost()->set_output_parameter_involve(is_output_parameter_involve_);
   // Set the memory cost in the 'strategy_cost_'
   for (auto &swc : strategy_cost_) {
     auto mem_cost = operator_cost()->GetMemoryCost(swc->inputs_ptr, swc->outputs_ptr);

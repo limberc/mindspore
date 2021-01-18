@@ -38,6 +38,9 @@ struct QuantArg {
   bool inited;
   std::vector<float> clusters{};
   int bitNum;
+  int roundType;
+  int multiplier;
+  int dstDtype;
 };
 
 class Tensor : public mindspore::tensor::MSTensor {
@@ -45,24 +48,33 @@ class Tensor : public mindspore::tensor::MSTensor {
   enum Category {
     CONST_TENSOR,  // weight tensor
     CONST_SCALAR,  // weight scalar
-    VAR            // activation tensor
+    VAR,           // activation tensor
+    GRAPH_INPUT,
   };
   Tensor() = default;
 
   Tensor(TypeId data_type, std::vector<int> shape, const schema::Format &format = schema::Format::Format_NHWC,
          Category category = VAR);
 
-  Tensor(const Tensor &tensor);
+  Tensor(const Tensor &tensor) = delete;
+
+  Tensor(Tensor &&other) = delete;
+
+  Tensor &operator=(const Tensor &tensor) = delete;
+
+  Tensor &operator=(Tensor &&src) = delete;
 
   ~Tensor() override;
 
-  int CopyTensorData(const Tensor &srcTensor);
+  static int CopyTensorData(const Tensor &src_tensor, Tensor *dst_tensor);
 
-  int CopyTensor(const Tensor &srcTensor, bool copyData = false);
-
-  Tensor &operator=(const Tensor &tensor);
+  static Tensor *CopyTensor(const Tensor &src_tensor, bool copy_data = false);
 
   virtual bool operator==(const Tensor &tensor);
+
+  void set_tensor_name(std::string name) { tensor_name_ = name; }
+
+  std::string tensor_name() const { return tensor_name_; }
 
   TypeId data_type() const override { return data_type_; }
 
@@ -94,19 +106,26 @@ class Tensor : public mindspore::tensor::MSTensor {
 
   virtual int MallocData(const mindspore::lite::Allocator *allocator = nullptr);
 
-  virtual int FreeData();
+  virtual void FreeData();
 
   void *MutableData() override;
 
-  virtual void *data_c() const { return data_; }
+  virtual void *data_c() const {
+    if (this->root_tensor_ != nullptr) {
+      return this->root_tensor_->data_;
+    }
+    return data_;
+  }
 
   virtual void set_data(void *data) { this->data_ = data; }
 
-  Category category() { return this->category_; }
+  Category category() const { return this->category_; }
+
+  void set_category(Category category) { this->category_ = category; }
 
   void set_format(schema::Format format) { this->format_ = format; }
 
-  schema::Format format() { return this->format_; }
+  schema::Format format() const { return this->format_; }
 
   size_t ref_count() const { return this->ref_count_; }
 
@@ -118,7 +137,7 @@ class Tensor : public mindspore::tensor::MSTensor {
 
   void ResetRefCount() { this->ref_count_ = this->init_ref_count_; }
 
-  void DecRefCount() { this->ref_count_--; }
+  void DecRefCount();
 
   std::string ToString() const;
 
@@ -130,14 +149,26 @@ class Tensor : public mindspore::tensor::MSTensor {
 
   void set_quant_clusters(const std::vector<float> &clusters);
 
-  bool IsConst();
+  virtual bool IsConst() const {
+    return (this->category_ == CONST_TENSOR || this->category_ == CONST_SCALAR) && this->data_ != nullptr;
+  }
 
-  bool IsScalar();
+  bool IsScalar() const { return this->category_ == CONST_SCALAR && this->data_ != nullptr; }
+
+  bool IsGraphInput() const { return this->category_ == GRAPH_INPUT; }
 
   void Prepare() {
     if (allocator_ != nullptr) {
       data_ = allocator_->Prepare(data_);
     }
+  }
+
+  virtual int set_root_tensor(Tensor *tensor);
+
+  Tensor *root_tensor() const { return this->root_tensor_; }
+
+  bool IsReady() const {
+    return this->IsConst() || (this->IsGraphInput() && this->data_ != nullptr) || this->ref_count_ >= 1;
   }
 
  private:
@@ -155,8 +186,8 @@ class Tensor : public mindspore::tensor::MSTensor {
   }
 
  protected:
+  std::string tensor_name_;
   void *data_ = nullptr;
-  void *device_data_ = nullptr;
   TypeId data_type_;
   std::vector<int> shape_;
   schema::Format format_;
@@ -166,6 +197,7 @@ class Tensor : public mindspore::tensor::MSTensor {
   std::vector<QuantArg> quant_params_;
   std::vector<float> quant_clusters_;
   mindspore::lite::Allocator *allocator_ = nullptr;
+  Tensor *root_tensor_ = nullptr;
 };
 
 inline size_t DataTypeSize(const TypeId type) {

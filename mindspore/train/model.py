@@ -465,6 +465,7 @@ class Model:
             if should_stop:
                 break
         dataset_helper.stop_send()
+        dataset_helper.release()
 
         list_callback.end(run_context)
 
@@ -553,7 +554,8 @@ class Model:
                                      returned and passed to the network. Otherwise, a tuple (data, label) should
                                      be returned. The data and label would be passed to the network and loss
                                      function respectively.
-            callbacks (list): List of callback objects which should be executed while training. Default: None.
+            callbacks (list, object): List of callback objects or callback object, which should be executed
+                                      while training. Default: None.
             dataset_sink_mode (bool): Determines whether to pass the data through dataset channel. Default: True.
                                       Configure pynative mode or CPU, the training process will be performed with
                                       dataset not sink.
@@ -726,7 +728,8 @@ class Model:
             Batch data should be put together in one tensor.
 
         Args:
-           predict_data: The predict data, can be array, number, str, dict, list or tuple.
+           predict_data: The predict data, can be bool, int, float, str, None, tensor,
+                         or tuple, list and dict that store these types.
 
         Returns:
             Tensor, array(s) of predictions.
@@ -737,7 +740,7 @@ class Model:
             >>> result = model.predict(input_data)
         """
         self._predict_network.set_train(False)
-        check_input_data(*predict_data, data_class=(int, float, str, tuple, list, dict, Tensor))
+        check_input_data(*predict_data, data_class=(int, float, str, None, Tensor))
         _parallel_predict_check()
         result = self._predict_network(*predict_data)
 

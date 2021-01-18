@@ -47,6 +47,7 @@ bool TbeOpParallelBuild(const std::vector<AnfNodePtr> &anf_nodes) {
     TbeKernelJsonCreator creator(SINGLE_BUILD);
     if (!creator.GenTbeSingleKernelJson(anf_node, &kernel_json)) {
       MS_LOG(ERROR) << "GenTbeSingleKernelJson failed";
+      TbeUtils::SaveJsonInfo(kernel_json["op_info"]["kernel_name"], kernel_json["op_info"].dump());
       return false;
     }
     // get size
@@ -69,6 +70,7 @@ bool TbeOpParallelBuild(const std::vector<AnfNodePtr> &anf_nodes) {
     }
     (void)processed_kernel.insert(json_name);
     // op build
+    TbeUtils::SaveJsonInfo(kernel_json["op_info"]["kernel_name"], kernel_json["op_info"].dump());
     auto task_id = build_manger->StartCompileOp(kernel_json);
     build_manger->SaveTaskInfo(task_id, anf_node, json_name, input_size_list, output_size_list);
   }
@@ -145,9 +147,6 @@ void ParallelBuildManager::PreTaskFinishProcess(int32_t task_id, const std::stri
 
 std::pair<int32_t, KernelModPtr> ParallelBuildManager::TaskFinishProcess(int32_t task_id, const std::string &build_ret,
                                                                          bool set_kernel_mod) {
-  auto compile_info = ProcessBuildRetStr(build_ret);
-  MS_LOG(DEBUG) << "Tbe build ret:" << compile_info;
-
   auto task_iter = task_map_.find(task_id);
   if (task_iter == task_map_.end()) {
     MS_EXCEPTION(ArgumentError) << "can find task_id:" << task_id;
@@ -170,8 +169,8 @@ std::pair<int32_t, KernelModPtr> ParallelBuildManager::TaskFinishProcess(int32_t
   MS_EXCEPTION_IF_NULL(kernel_mod);
   if (set_kernel_mod) {
     AnfAlgo::SetKernelMod(kernel_mod, task_iter->second.node.get());
-    AnfAlgo::SetNodeAttr(kAttrCompileInfo, MakeValue(compile_info), task_iter->second.node);
-    MS_LOG(DEBUG) << "Set Node Attr compile_info:" << compile_info;
+    AnfAlgo::SetNodeAttr(kAttrCompileInfo, MakeValue(build_ret), task_iter->second.node);
+    MS_LOG(INFO) << "Set Node Attr compile_info:" << build_ret;
   }
   auto ret = std::make_pair(task_iter->second.scope_id, kernel_mod);
   (void)task_map_.erase(task_iter);
@@ -257,20 +256,6 @@ AnfNodePtr ParallelBuildManager::GetAnfNodeByTaskID(int32_t task_id) {
     return find_iter->second.node;
   }
   return nullptr;
-}
-
-std::string ParallelBuildManager::ProcessBuildRetStr(const std::string &build_result) {
-  std::string start_flag = "fusion_pattern_start";
-  std::string end_flag = "fusion_pattern_end";
-  int start = build_result.find(start_flag);
-  int end = build_result.find(end_flag);
-  if (start != -1 && end != -1 && end >= start) {
-    std::string result = build_result.substr(start + start_flag.size(), end - start - start_flag.size());
-    if (!result.empty()) {
-      return result;
-    }
-  }
-  return "";
 }
 }  // namespace kernel
 }  // namespace mindspore

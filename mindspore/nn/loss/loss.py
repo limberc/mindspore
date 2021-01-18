@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -46,6 +46,8 @@ class _Loss(Cell):
 
         self.reduce_mean = _selected_ops.ReduceMean()
         self.reduce_sum = P.ReduceSum()
+        self.mul = P.Mul()
+        self.cast = P.Cast()
 
     def get_axis(self, x):
         shape = F.shape(x)
@@ -53,11 +55,22 @@ class _Loss(Cell):
         perm = F.make_range(0, length)
         return perm
 
-    def get_loss(self, x):
+    def get_loss(self, x, weights=1.0):
+        """
+        Computes the weighted loss
+        Args:
+            weights: Optional `Tensor` whose rank is either 0, or the same rank as inputs, and must be broadcastable to
+                inputs (i.e., all dimensions must be either `1`, or the same as the corresponding inputs dimension).
+        """
+        input_dtype = x.dtype
+        x = self.cast(x, mstype.float32)
+        weights = self.cast(weights, mstype.float32)
+        x = self.mul(weights, x)
         if self.reduce and self.average:
             x = self.reduce_mean(x, self.get_axis(x))
         if self.reduce and not self.average:
             x = self.reduce_sum(x, self.get_axis(x))
+        x = self.cast(x, input_dtype)
         return x
 
     def construct(self, base, target):
@@ -268,18 +281,81 @@ class SoftmaxCrossEntropyWithLogits(_Loss):
         self.on_value = Tensor(1.0, mstype.float32)
         self.off_value = Tensor(0., mstype.float32)
         self.is_cpugpu = context.get_context('device_target') in ["CPU", "GPU"]
-        if self.is_cpugpu:
-            self.sparse_softmax_cross_entropy = P.SparseSoftmaxCrossEntropyWithLogits()
+        self.sparse_softmax_cross_entropy = P.SparseSoftmaxCrossEntropyWithLogits()
 
     def construct(self, logits, labels):
-        if self.is_cpugpu and self.sparse and self.reduction == 'mean':
-            x = self.sparse_softmax_cross_entropy(logits, labels)
-            return x
-
         if self.sparse:
+            if self.reduction == 'mean':
+                x = self.sparse_softmax_cross_entropy(logits, labels)
+                return x
             labels = self.one_hot(labels, F.shape(logits)[-1], self.on_value, self.off_value)
         x = self.softmax_cross_entropy(logits, labels)[0]
         return self.get_loss(x)
+
+@constexpr
+def _check_label_dtype(labels_dtype, cls_name):
+    validator.check_type_name("labels", labels_dtype, [mstype.int32, mstype.int64], cls_name)
+
+
+class DiceLoss(_Loss):
+    r"""
+    The Dice coefficient is a set similarity loss. It is used to calculate the similarity between two samples. The
+    value of the Dice coefficient is 1 when the segmentation result is the best and 0 when the segmentation result
+    is the worst. The Dice coefficient indicates the ratio of the area between two objects to the total area.
+    The function is shown as follows:
+
+    .. math::
+        dice = 1 - \frac{2 * (pred \bigcap true)}{pred \bigcup true}
+
+    Args:
+        smooth (float): A term added to the denominator to improve numerical stability. Should be greater than 0.
+                        Default: 1e-5.
+        threshold (float): A threshold, which is used to compare with the input tensor. Default: 0.5.
+
+    Inputs:
+        - **y_pred** (Tensor) - Tensor of shape (N, C).
+        - **y** (Tensor) - Tensor of shape (N, C).
+
+    Outputs:
+        Tensor, a tensor of shape with the per-example sampled Dice losses.
+
+    Supported Platforms:
+        ``Ascend``
+
+    Examples:
+        >>> loss = nn.Diceloss(smooth=1e-5, threshold=0.5)
+        >>> y_pred = Tensor(np.array([[0.2, 0.5], [0.3, 0.1], [0.9, 0.6]]), mstype.float32)
+        >>> y = Tensor(np.array([[0, 1], [1, 0], [0, 1]]), mstype.float32)
+        >>> output = loss(y_pred, y)
+        >>> print(output)
+        [0.77777076]
+    """
+    def __init__(self, smooth=1e-5, threshold=0.5):
+        super(DiceLoss, self).__init__()
+        self.smooth = validator.check_positive_float(smooth, "smooth")
+        self.threshold = validator.check_value_type("threshold", threshold, [float])
+        self.reshape = P.Reshape()
+
+    def construct(self, logits, label):
+        _check_shape(logits.shape, label.shape)
+        logits = self.cast((logits > self.threshold), mstype.float32)
+        label = self.cast(label, mstype.float32)
+        dim = label.shape
+        pred_flat = self.reshape(logits, (dim[0], -1))
+        true_flat = self.reshape(label, (dim[0], -1))
+
+        intersection = self.reduce_sum((pred_flat * true_flat), 1)
+        unionset = self.reduce_sum(pred_flat, 1) + self.reduce_sum(true_flat, 1)
+
+        dice = (2 * intersection + self.smooth) / (unionset + self.smooth)
+        dice_loss = 1 - self.reduce_sum(dice) / dim[0]
+
+        return dice_loss
+
+
+@constexpr
+def _check_shape(logits_shape, label_shape):
+    validator.check('logits_shape', logits_shape, 'label_shape', label_shape)
 
 
 class SampledSoftmaxLoss(_Loss):
@@ -373,8 +449,11 @@ class SampledSoftmaxLoss(_Loss):
         self.zeros_like = P.ZerosLike()
         self.mul = P.Mul()
         self.expand_dims = P.ExpandDims()
+        self.dtype = P.DType()
 
     def construct(self, weights, biases, labels, inputs):
+        _check_label_dtype(self.dtype(labels), self.cls_name)
+
         logits, labels = self._compute_sampled_logits(
             weights=weights,
             biases=biases,
@@ -424,6 +503,7 @@ class SampledSoftmaxLoss(_Loss):
                 `[batch_size, num_true + num_sampled]`
             out_labels: A Tensor object with the same shape as `out_logits`.
         """
+
         if not labels.dtype == mstype.int32:
             labels = self.cast(labels, mstype.int32)
         labels = self.reshape(labels, (-1, num_true))
@@ -493,23 +573,23 @@ class BCELoss(_Loss):
     r"""
     BCELoss creates a criterion to measure the binary cross entropy between the true labels and predicted labels.
 
+    Set the predicted labels as :math:`x`, true labels as :math:`y`, the output loss as :math:`\ell(x, y)`.
+    Let,
+
+    .. math::
+        L = \{l_1,\dots,l_N\}^\top, \quad
+        l_n = - w_n \left[ y_n \cdot \log x_n + (1 - y_n) \cdot \log (1 - x_n) \right]
+
+    Then,
+
+    .. math::
+        \ell(x, y) = \begin{cases}
+        L, & \text{if reduction} = \text{`none';}\\
+        \operatorname{mean}(L), & \text{if reduction} = \text{`mean';}\\
+        \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
+        \end{cases}
+
     Note:
-        Set the predicted labels as :math:`x`, true labels as :math:`y`, the output loss as :math:`\ell(x, y)`.
-        Let,
-
-        .. math::
-            L = \{l_1,\dots,l_N\}^\top, \quad
-            l_n = - w_n \left[ y_n \cdot \log x_n + (1 - y_n) \cdot \log (1 - x_n) \right]
-
-        Then,
-
-        .. math::
-            \ell(x, y) = \begin{cases}
-            L, & \text{if reduction} = \text{`none';}\\
-            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';}\\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
-            \end{cases}
-
         Note that the predicted labels should always be the output of sigmoid and the true labels should be numbers
         between 0 and 1.
 

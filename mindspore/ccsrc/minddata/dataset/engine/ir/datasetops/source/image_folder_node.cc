@@ -53,6 +53,7 @@ void ImageFolderNode::Print(std::ostream &out) const {
 }
 
 Status ImageFolderNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   RETURN_IF_NOT_OK(ValidateDatasetDirParam("ImageFolderNode", dataset_dir_));
 
   RETURN_IF_NOT_OK(ValidateDatasetSampler("ImageFolderNode", sampler_));
@@ -60,7 +61,7 @@ Status ImageFolderNode::ValidateParams() {
   return Status::OK();
 }
 
-Status ImageFolderNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
+Status ImageFolderNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   // Do internal Schema generation.
   // This arg is exist in ImageFolderOp, but not externalized (in Python API).
   std::unique_ptr<DataSchema> schema = std::make_unique<DataSchema>();
@@ -99,5 +100,22 @@ Status ImageFolderNode::GetDatasetSize(const std::shared_ptr<DatasetSizeGetter> 
   return Status::OK();
 }
 
+Status ImageFolderNode::to_json(nlohmann::json *out_json) {
+  nlohmann::json args, sampler_args;
+  RETURN_IF_NOT_OK(sampler_->to_json(&sampler_args));
+  args["sampler"] = sampler_args;
+  args["num_parallel_workers"] = num_workers_;
+  args["dataset_dir"] = dataset_dir_;
+  args["decode"] = decode_;
+  args["extensions"] = exts_;
+  args["class_indexing"] = class_indexing_;
+  if (cache_ != nullptr) {
+    nlohmann::json cache_args;
+    RETURN_IF_NOT_OK(cache_->to_json(&cache_args));
+    args["cache"] = cache_args;
+  }
+  *out_json = args;
+  return Status::OK();
+}
 }  // namespace dataset
 }  // namespace mindspore

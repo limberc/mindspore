@@ -21,6 +21,7 @@ from .multitype_ops import _constexpr_utils as const_utils
 from ...common import dtype as mstype
 from ...common.seed import _get_graph_seed
 
+
 @constexpr
 def _get_seed(op_seed, kernel_name):
     "Get the graph-level seed."
@@ -59,13 +60,14 @@ def normal(shape, mean, stddev, seed=None):
     """
     mean_dtype = F.dtype(mean)
     stddev_dtype = F.dtype(stddev)
-    const_utils.check_valid_type(mean_dtype, mstype.int_type + (mstype.float16, mstype.float32), 'normal')
-    const_utils.check_valid_type(stddev_dtype, mstype.int_type + (mstype.float16, mstype.float32), 'normal')
+    const_utils.check_type_valid(mean_dtype, mstype.int_type + (mstype.float16, mstype.float32), 'normal')
+    const_utils.check_type_valid(stddev_dtype, mstype.int_type + (mstype.float16, mstype.float32), 'normal')
     seed1, seed2 = _get_seed(seed, "normal")
     stdnormal = P.StandardNormal(seed1, seed2)
     random_normal = stdnormal(shape)
     value = random_normal * stddev + mean
     return value
+
 
 def laplace(shape, mean, lambda_param, seed=None):
     r"""
@@ -79,7 +81,7 @@ def laplace(shape, mean, lambda_param, seed=None):
         shape (tuple): The shape of random tensor to be generated.
         mean (Tensor): The mean μ distribution parameter, which specifies the location of the peak.
           With float32 data type.
-        lambda_param (Tensor): The parameter used for controling the variance of this random distribution. The
+        lambda_param (Tensor): The parameter used for controlling the variance of this random distribution. The
           variance of Laplace distribution is equal to twice the square of lambda_param. With float32 data type.
         seed (int): Seed is used as entropy source for Random number engines generating pseudo-random numbers.
           Default: None, which will be treated as 0.
@@ -92,10 +94,15 @@ def laplace(shape, mean, lambda_param, seed=None):
         ``Ascend`` ``GPU`` ``CPU``
 
     Examples:
-        >>> shape = (4, 16)
+        >>> from mindspore import Tensor
+        >>> from mindspore.ops import composite as C
+        >>> import mindspore.common.dtype as mstype
+        >>> shape = (2, 3)
         >>> mean = Tensor(1.0, mstype.float32)
         >>> lambda_param = Tensor(1.0, mstype.float32)
         >>> output = C.laplace(shape, mean, lambda_param, seed=5)
+        >>> print(output.shape)
+        (2, 3)
     """
     mean_dtype = F.dtype(mean)
     lambda_param_dtype = F.dtype(lambda_param)
@@ -106,6 +113,7 @@ def laplace(shape, mean, lambda_param, seed=None):
     rnd = stdlaplace(shape)
     value = rnd * lambda_param + mean
     return value
+
 
 def uniform(shape, minval, maxval, seed=None, dtype=mstype.float32):
     """
@@ -154,7 +162,7 @@ def uniform(shape, minval, maxval, seed=None, dtype=mstype.float32):
     """
     minval_dtype = F.dtype(minval)
     maxval_dtype = F.dtype(maxval)
-    const_utils.check_valid_type(dtype, [mstype.int32, mstype.float32], 'uniform')
+    const_utils.check_type_valid(dtype, [mstype.int32, mstype.float32], 'uniform')
     const_utils.check_tensors_dtype_same(minval_dtype, dtype, "uniform")
     const_utils.check_tensors_dtype_same(maxval_dtype, dtype, "uniform")
     seed1, seed2 = _get_seed(seed, "uniform")
@@ -166,6 +174,7 @@ def uniform(shape, minval, maxval, seed=None, dtype=mstype.float32):
         random_uniform = uniform_real(shape)
         value = random_uniform * (maxval - minval) + minval
     return value
+
 
 def gamma(shape, alpha, beta, seed=None):
     """
@@ -200,9 +209,14 @@ def gamma(shape, alpha, beta, seed=None):
     value = random_gamma(shape, alpha, beta)
     return value
 
+
 def poisson(shape, mean, seed=None):
-    """
+    r"""
     Generates random numbers according to the Poisson random number distribution.
+
+    .. math::
+
+        \text{P}(i|μ) = \frac{\exp(-μ)μ^{i}}{i!}
 
     Args:
         shape (tuple): The shape of random tensor to be generated.
@@ -229,6 +243,7 @@ def poisson(shape, mean, seed=None):
     random_poisson = P.Poisson(seed1, seed2)
     value = random_poisson(shape, mean)
     return value
+
 
 def multinomial(inputs, num_sample, replacement=True, seed=None):
     r"""
@@ -257,6 +272,8 @@ def multinomial(inputs, num_sample, replacement=True, seed=None):
     Examples:
         >>> input = Tensor([0, 9, 4, 0], mstype.float32)
         >>> output = C.multinomial(input, 2, True)
+        >>> print(output)
+        [1 1]
     """
     shape = P.Shape()
     reshape = P.Reshape()

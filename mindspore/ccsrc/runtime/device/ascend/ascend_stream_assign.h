@@ -161,6 +161,15 @@ class AscendStreamAssign {
   void GetProcessedStream(const NotNull<KernelGraphPtr> &graph_ptr);
   void GetNeedActiveStreams(const NotNull<KernelGraphPtr> &graph_ptr);
   void ReorderIndependentOrders(const NotNull<KernelGraphPtr> &graph_ptr);
+
+  void CheckScenario(const NotNull<KernelGraphPtr> &graph_ptr, vector<CNodePtr> *last_grad_and_status);
+  CNodePtr GetCNodesNeededMoved(vector<CNodePtr> *moved_backward_cnodes, vector<CNodePtr> *moved_forward_cnodes,
+                                const vector<CNodePtr> &last_grad_and_status, const NotNull<KernelGraphPtr> &graph_ptr);
+  CNodePtr GetTargetOutputNode(const vector<CNodePtr> &moved_backward_cnodes, const CNodePtr first_node,
+                               const NotNull<KernelGraphPtr> &graph_ptr);
+  bool FinetuneSubgraphExecOrder(vector<CNodePtr> *cnodes);
+  void TrailingTimeOptimizationByReorder(const NotNull<KernelGraphPtr> &graph_ptr);
+
   uint32_t GetMaxIndexTarget(const NotNull<KernelGraphPtr> &graph_ptr);
   uint32_t GetIndexByKey(const NotNull<KernelGraphPtr> &graph_ptr, const CNodeKey &key);
   uint32_t GetIndependentStreamSwitchStreamId(const NotNull<KernelGraphPtr> &graph_ptr);
@@ -212,6 +221,8 @@ class AscendStreamAssign {
   std::map<CNodePtr, CNodePtr> event_map_{};
   std::set<uint32_t> middle_active_streams_{};
   // new policy end
+  bool IsAllOutGraphOut(const KernelGraphPtr &graph, const CNodePtr &cnode);
+  vector<CNodePtr>::iterator FindGraphEnd(vector<CNodePtr>::iterator begin, vector<CNodePtr>::iterator end);
 };
 }  // namespace ascend
 }  // namespace device

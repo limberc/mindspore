@@ -32,8 +32,6 @@
 #include "tools/anf_exporter/anf_exporter.h"
 #include "tools/anf_importer/import_from_mindir.h"
 #include "proto/onnx.pb.h"
-#include "tools/converter/quantizer/post_training_quantizer.h"
-#include "tools/converter/quantizer/quant_cast.h"
 #include "include/version.h"
 
 namespace mindspore {
@@ -67,6 +65,11 @@ MetaGraphT *Converter::Convert(const converter::Flags *flag) {
     int status = modelImporter->Import(flag);
     ReturnCode::GetSingleReturnCode()->UpdateReturnCode(status);
     graph = modelImporter->GetResult();
+    if (graph == nullptr) {
+      return nullptr;
+    }
+    graph->set_attr("graph_name", MakeValue("main_graph"));
+    graph->set_attr("fmk", MakeValue(static_cast<int>(converter::FmkType_MS)));
   } else {
     MS_ASSERT(nullptr != modelParser);
     const std::string modelFile = flag->modelFile;
@@ -90,6 +93,7 @@ MetaGraphT *Converter::Convert(const converter::Flags *flag) {
     MS_LOG(ERROR) << "Export to meta graph return nullptr";
     return nullptr;
   }
+
   // transform
   transform->SetGraphDef(meta_graph);
   auto status = transform->Transform(*flag);

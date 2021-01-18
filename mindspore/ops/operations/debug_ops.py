@@ -331,8 +331,8 @@ class Print(PrimitiveWithInfer):
         In pynative mode, please use python print function.
 
     Inputs:
-        - **input_x** (Union[Tensor, str]) - The graph node to attach to. The input supports
-          multiple strings and tensors which are separated by ','.
+        - **input_x** (Union[Tensor, bool, int, float, str, tuple, list]) - The graph node to attach to.
+          The input supports multiple strings and tensors which are separated by ','.
 
     Supported Platforms:
         ``Ascend``
@@ -350,7 +350,12 @@ class Print(PrimitiveWithInfer):
         >>> x = Tensor(np.ones([2, 1]).astype(np.int32))
         >>> y = Tensor(np.ones([2, 2]).astype(np.int32))
         >>> net = PrintDemo()
-        >>> output = net(x, y)
+        >>> result = net(x, y)
+        Print Tensor x and Tensor y:
+        [[1]
+         [1]]
+        [[1 1]
+         [1 1]]
     """
 
     @prim_attr_register
@@ -365,8 +370,13 @@ class Print(PrimitiveWithInfer):
         return [1]
 
     def infer_dtype(self, *inputs):
-        for dtype in inputs:
-            validator.check_subclass("input", dtype, (mstype.tensor, mstype.string), self.name)
+        for ele in inputs:
+            if isinstance(ele, (tuple, list)):
+                self.infer_dtype(*ele)
+            else:
+                validator.check_subclass("input", ele,
+                                         [mstype.tensor, mstype.int_, mstype.float_, mstype.bool_, mstype.string],
+                                         self.name)
         return mstype.int32
 
 

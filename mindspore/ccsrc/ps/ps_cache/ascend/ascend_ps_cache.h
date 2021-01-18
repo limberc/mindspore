@@ -51,15 +51,15 @@ class AscendPsCache : public PsCacheBasic {
   ~AscendPsCache() override = default;
   bool InitDevice(uint32_t device_id, const void *context) override;
   void *MallocMemory(size_t size) override;
-  bool MallocConstantMemory(size_t constant_value) override;
+  bool MallocConstantMemory(size_t cache_vocab_size) override;
   bool RecordEvent() override;
   bool SynchronizeEvent() override;
   bool SynchronizeStream() override;
   bool CopyHostMemToDevice(void *dst, void *src, size_t size) override;
   bool CopyDeviceMemToHost(void *dst, void *src, size_t size) override;
-  bool HashSwapOut(void *hash_table_addr, void *swap_out_value_addr, void *swap_out_index_addr, size_t hash_table_size,
+  bool HashSwapOut(void *hash_table_addr, void *swap_out_value_addr, void *swap_out_index_addr, size_t cache_vocab_size,
                    size_t embedding_size, size_t swap_out_size) override;
-  bool HashSwapIn(void *hash_table_addr, void *swap_in_value_addr, void *swap_in_index_addr, size_t hash_table_size,
+  bool HashSwapIn(void *hash_table_addr, void *swap_in_value_addr, void *swap_in_index_addr, size_t cache_vocab_size,
                   size_t embedding_size, size_t swap_in_size) override;
 
  private:

@@ -65,13 +65,12 @@
 #include "backend/optimizer/ascend/ir_fusion/confusion_mul_grad_fusion.h"
 #include "backend/optimizer/ascend/ir_fusion/softmax_grad_ext_fusion.h"
 #include "backend/optimizer/ascend/format_type/insert_trans_op.h"
-#include "backend/optimizer/ascend/format_type/add_attr_for_3d_graph.h"
+#include "backend/optimizer/ascend/format_type/add_reformat_op.h"
 #include "backend/optimizer/ascend/format_type/dynamic_rnn_grad_reformat.h"
 #include "backend/optimizer/ascend/format_type/insert_transpose_for_basiclstm_op.h"
 #include "backend/optimizer/ascend/format_type/insert_transpose_for_dyanmic_gru_v2.h"
 #include "backend/optimizer/ascend/format_type/rectify_do_mask_kernel_info.h"
 #include "backend/optimizer/ascend/format_type/chang_axis_of_reduce_kernel.h"
-#include "backend/optimizer/ascend/format_type/split_unsupported_transdata.h"
 #include "backend/optimizer/ascend/format_type/convert_cast_format.h"
 #include "backend/optimizer/pass/getitem_tuple.h"
 #include "backend/optimizer/pass/optimize_dependence.h"
@@ -115,8 +114,10 @@
 #include "backend/optimizer/ascend/ir_fission/concat_fission.h"
 #include "backend/optimizer/ascend/ir_fission/pack_fission.h"
 #include "backend/optimizer/ascend/enhancer/concat_outputs_for_all_gather.h"
+#include "backend/optimizer/ascend/enhancer/split_inputs_for_reduce_scatter.h"
 #include "backend/optimizer/ascend/enhancer/add_placeholder_for_dynamic_rnn.h"
 #include "backend/optimizer/ascend/enhancer/add_placeholder_for_dynamic_gru.h"
+#include "backend/optimizer/ascend/enhancer/add_attr_for_3d_graph.h"
 #include "utils/ms_context.h"
 #include "utils/config_manager.h"
 #include "debug/anf_ir_dump.h"
@@ -154,7 +155,6 @@ void AddAscendIRFusionRulesPass(PassManager *ir_fusion_pm) {
 
 void AddAscendIRFusionPass(PassManager *ir_fusion_pm) {
   MS_EXCEPTION_IF_NULL(ir_fusion_pm);
-  ir_fusion_pm->AddPass(std::make_shared<BatchNormBertFission>());
   ir_fusion_pm->AddPass(std::make_shared<SingleBatchNormFission>());
   ir_fusion_pm->AddPass(std::make_shared<BatchNorm2BNInfer>());
   ir_fusion_pm->AddPass(std::make_shared<BatchNormGrad2BNInferGrad>());
@@ -210,7 +210,6 @@ void AscendDataLayout(const std::shared_ptr<session::KernelGraph> &kernel_graph)
   data_layout_pm->AddPass(std::make_shared<RectifyDoMaskKernelInfo>());
   data_layout_pm->AddPass(std::make_shared<DynamicRNNGradReformat>());
   data_layout_pm->AddPass(std::make_shared<ChangeAxisOfReduceKernel>());
-  data_layout_pm->AddPass(std::make_shared<AddIoFormatAttrFor3DGraph>());
   auto ms_context = MsContext::GetInstance();
   MS_EXCEPTION_IF_NULL(ms_context);
   if (ms_context->get_param<int>(MS_CTX_EXECUTION_MODE) == kPynativeMode) {
@@ -220,8 +219,10 @@ void AscendDataLayout(const std::shared_ptr<session::KernelGraph> &kernel_graph)
     data_layout_pm->AddPass(std::make_shared<ConvertCastFormat>());
     data_layout_pm->AddPass(std::make_shared<EraseVisitAttr>());
     data_layout_pm->AddPass(std::make_shared<InsertTransOp>());
+    data_layout_pm->AddPass(std::make_shared<GetitemTuple>());
   }
-  data_layout_pm->AddPass(std::make_shared<GetitemTuple>());
+  data_layout_pm->AddPass(std::make_shared<EraseVisitAttr>());
+  data_layout_pm->AddPass(std::make_shared<AddIoFormatAttrFor3DGraph>());
   data_layout_pm->AddPass(std::make_shared<CommonSubexpressionElimination>());
   data_layout_pm->AddPass(std::make_shared<RemoveReshapePair>());
   data_layout_pm->AddPass(std::make_shared<EliminateRedundantOp>());
@@ -250,7 +251,6 @@ void AscendMixPrecision(const std::shared_ptr<session::KernelGraph> &kernel_grap
   mixed_precision_pm->AddPass(std::make_shared<MergeCastToOp>());
   mixed_precision_pm->AddPass(std::make_shared<LayerNormBetaGammaBackpropFusion>());
   mixed_precision_pm->AddPass(std::make_shared<EraseVisitAttr>());
-  mixed_precision_pm->AddPass(std::make_shared<SplitUnsupportedTransData>());
   mixed_precision_pm->AddPass(std::make_shared<ConvertUnSupportNodeToAICPU>());
   mixed_precision_pm->AddPass(std::make_shared<RemoveInternalOutputCast>());
   optimizer->AddPassManager(mixed_precision_pm);
@@ -269,15 +269,8 @@ void AscendBackendIRFusionOptimization(const std::shared_ptr<session::KernelGrap
   }
   auto optimizer = std::make_shared<GraphOptimizer>();
   auto ir_fusion_pm = std::make_shared<PassManager>("ir_fusion_pm");
-  if (context_ptr->get_param<int>(MS_CTX_EXECUTION_MODE) == kPynativeMode) {
-    ir_fusion_pm->AddPass(std::make_shared<BnSplit>());
-    ir_fusion_pm->AddPass(std::make_shared<BnGradSplit>());
-  } else {
-    ir_fusion_pm->AddPass(std::make_shared<BatchNormGradSplit>());
-    ir_fusion_pm->AddPass(std::make_shared<FusedBatchNormFusion>());
-    ir_fusion_pm->AddPass(std::make_shared<FusedBatchNormMixPrecisionFusion0>());
-    ir_fusion_pm->AddPass(std::make_shared<FusedBatchNormMixPrecisionFusion1>());
-  }
+  ir_fusion_pm->AddPass(std::make_shared<BnSplit>());
+  ir_fusion_pm->AddPass(std::make_shared<BnGradSplit>());
   ir_fusion_pm->AddPass(std::make_shared<LayerNormGradSplit>());
   ir_fusion_pm->AddPass(std::make_shared<InsertPadForNMSWithMask>());
   ir_fusion_pm->AddPass(std::make_shared<InsertPlaceholderForDynamicGRUV2>());
@@ -362,6 +355,7 @@ void AscendBackendOptimization(const std::shared_ptr<session::KernelGraph> &kern
   other_pm->AddPass(std::make_shared<AllGatherFusion>());
   other_pm->AddPass(std::make_shared<ConcatOutputsForAllGather>());
   other_pm->AddPass(std::make_shared<ReduceScatterFusion>());
+  other_pm->AddPass(std::make_shared<SplitInputsForReduceScatter>());
   other_pm->AddPass(std::make_shared<BroadcastFusion>());
   other_pm->AddPass(std::make_shared<InsertMemcpyAsyncForCascade>());
   other_pm->AddPass(std::make_shared<ParameterTransOpFusion>());
@@ -381,6 +375,7 @@ void AscendBackendOptimization(const std::shared_ptr<session::KernelGraph> &kern
       ConfigManager::GetInstance().iter_num() > 1) {
     other2_pm->AddPass(std::make_shared<GetnextMemcpyElimination>());
   }
+  other2_pm->AddPass(std::make_shared<AddReFormatOp>());
   other2_pm->AddPass(std::make_shared<CheckConsistency>());
   optimizer2->AddPassManager(other2_pm);
   (void)optimizer2->Optimize(kernel_graph);

@@ -14,36 +14,25 @@
  * limitations under the License.
  */
 
+#include "src/tensorlist.h"
+#include <utility>
+#include <algorithm>
 #include "include/ms_tensor.h"
-
 #include "src/common/log_adapter.h"
 #include "schema/model_generated.h"
 #include "src/tensor.h"
-#include "src/tensorlist.h"
 
-namespace mindspore {
-namespace lite {
+namespace mindspore::lite {
 
-TensorList::TensorList(std::vector<int> shape, std::vector<int> element_shape)
-    : Tensor(kObjectTypeTensorType, shape), element_shape_(element_shape) {}
+TensorList::TensorList(std::vector<int> shape, std::vector<int> element_shape, Category category)
+    : Tensor(kObjectTypeTensorType, std::move(shape), schema::Format::Format_NHWC, category),
+      element_shape_(std::move(element_shape)) {}
 
 TensorList::~TensorList() {
   if (!this->tensors_.empty()) {
-    this->FreeData();
+    this->TensorList::FreeData();
     this->FreeTensorListData();
   }
-}
-
-TensorList &TensorList::operator=(const TensorList &src) {
-  if (&src == this) {
-    return *this;
-  }
-  auto ret = CopyTensorList(src, true);
-  if (ret == RET_ERROR) {
-    MS_LOG(ERROR) << "CopyTensorList error!";
-    MS_ASSERT(false);
-  }
-  return *this;
 }
 
 int TensorList::CopyTensorList(const TensorList &src, bool copy_data) {
@@ -59,6 +48,10 @@ int TensorList::CopyTensorList(const TensorList &src, bool copy_data) {
       return RET_ERROR;
     }
   } else {
+    for (auto tensor : this->tensors()) {
+      delete tensor;
+    }
+    this->tensors_.clear();
     // each tensor in tensors_ will share the same memory space.
     this->tensors_ = src.tensors_;
   }
@@ -66,17 +59,23 @@ int TensorList::CopyTensorList(const TensorList &src, bool copy_data) {
 }
 
 int TensorList::CopyTensorData(const TensorList &src) {
+  if (src.tensors_.empty()) {
+    return RET_OK;
+  }
+  for (auto tensor : this->tensors()) {
+    delete tensor;
+  }
+  this->tensors_.clear();
   for (int i = 0; i < this->ElementsNum(); ++i) {
     if (src.tensors_[i] == nullptr) {
       MS_LOG(ERROR) << "src tensors_[" << i << "] is nullptr!";
       return RET_ERROR;
     }
-    auto dst_tensor = new (std::nothrow) Tensor;
+    auto dst_tensor = Tensor::CopyTensor(*src.tensors_[i]);
     if (dst_tensor == nullptr) {
       MS_LOG(ERROR) << "CopyTensorData: new tensor[" << i << "] is failed!";
       return RET_ERROR;
     }
-    *reinterpret_cast<Tensor *>(dst_tensor) = *src.tensors_[i];
     this->tensors_.push_back(dst_tensor);
   }
   return RET_OK;
@@ -115,8 +114,14 @@ int TensorList::MallocTensorListData(TypeId dtype, const std::vector<std::vector
 }
 
 int TensorList::MallocData(const mindspore::lite::Allocator *allocator) {
+  if (allocator != nullptr) {
+    allocator_ = const_cast<mindspore::lite::Allocator *>(allocator);
+  }
   // malloc data buf of each tensor in tensors_
   for (int i = 0; i < this->ElementsNum(); ++i) {
+    if (tensors_.empty()) {
+      return RET_OK;
+    }
     auto tensor_ptr = this->tensors_[i];
     if (tensor_ptr == nullptr) {
       MS_LOG(ERROR) << "tensors_[" << i << "] is nullptr!";
@@ -134,17 +139,11 @@ int TensorList::MallocData(const mindspore::lite::Allocator *allocator) {
   return RET_OK;
 }
 
-int TensorList::FreeData() {
+void TensorList::FreeData() {
   // free data buf of each tensor in tensors_
-  if (this->tensors_.empty()) {
-    return RET_OK;
+  for (auto tensor : tensors_) {
+    tensor->FreeData();
   }
-  for (int i = 0; i < this->ElementsNum(); ++i) {
-    if (this->tensors_[i] != nullptr) {
-      this->tensors_[i]->FreeData();
-    }
-  }
-  return RET_OK;
 }
 
 int TensorList::FreeTensorListData() {
@@ -162,7 +161,7 @@ int TensorList::FreeTensorListData() {
   return RET_OK;
 }
 
-int TensorList::SetTensorIndex(int index, Tensor *src_tensor) {
+int TensorList::SetTensor(int index, Tensor *src_tensor) {
   // your can use this fun to modify tensor[index] value
   if (src_tensor->data_type() != this->tensors_data_type_) {
     MS_LOG(ERROR) << "src_tensor->data_type()：" << src_tensor->data_type()
@@ -174,15 +173,13 @@ int TensorList::SetTensorIndex(int index, Tensor *src_tensor) {
     return RET_ERROR;
   }
   auto dst_tensor = this->tensors_[index];
-  if (dst_tensor != nullptr) {  // free original tensor data
-    delete dst_tensor;
-  }
-  this->tensors_[index] = new (std::nothrow) Tensor;
+  // free original tensor data
+  delete dst_tensor;
+  this->tensors_[index] = Tensor::CopyTensor(*src_tensor);
   if (this->tensors_[index] == nullptr) {
-    MS_LOG(ERROR) << "SetTensorIndex: new tensor is failed!";
+    MS_LOG(ERROR) << "SetTensor: new tensor is failed!";
     return RET_ERROR;
   }
-  *this->tensors_[index] = *src_tensor;
   return RET_OK;
 }
 
@@ -202,9 +199,40 @@ int TensorList::CheckTensorListParam() {
   return RET_OK;
 }
 
-Tensor *TensorList::GetTensorIndex(int index) {
+int TensorList::set_root_tensor(Tensor *tensor) {
+  auto ret = Tensor::set_root_tensor(tensor);
+  if (ret != RET_OK) {
+    return ret;
+  }
+  if (this->data_type_ != kObjectTypeTensorType) {
+    return RET_OK;
+  }
+  auto root_tensorlist = reinterpret_cast<TensorList *>(this->root_tensor_);
+  if (root_tensorlist == nullptr) {
+    MS_LOG(ERROR) << "root_tensor of tensorlist should be a tensorlist";
+    return RET_INFER_INVALID;
+  }
+  this->element_shape_ = root_tensorlist->element_shape_;
+  this->max_elements_num_ = root_tensorlist->max_elements_num_;
+  this->tensors_data_type_ = root_tensorlist->tensors_data_type_;
+  return RET_OK;
+}
+
+Tensor *TensorList::GetTensor(int index) {
   // return tensor[index] ptr. With this function, you can modify tensors_[index] at will.
-  if (index < 0 || index >= static_cast<int>(tensors_.size())) {
+  if (this->root_tensor_ != nullptr) {
+    if (this->data_type_ != kObjectTypeTensorType) {
+      MS_LOG(ERROR) << "root_tensor of tensorlist should be a tensorlist";
+      return nullptr;
+    }
+    auto root_tensorlist = reinterpret_cast<TensorList *>(this->root_tensor_);
+    if (index < 0 || index >= static_cast<int>(root_tensorlist->tensors_.size())) {
+      MS_LOG(ERROR) << "index:" << index << " must in [0, " << this->ElementsNum() - 1 << "]!";
+      return nullptr;
+    }
+    return root_tensorlist->tensors_[index];
+  }
+  if (index < 0 || index >= static_cast<int>(this->tensors_.size())) {
     MS_LOG(ERROR) << "index:" << index << " must in [0, " << this->ElementsNum() - 1 << "]!";
     return nullptr;
   }
@@ -250,7 +278,24 @@ STATUS TensorList::Decode(const int *data) {
   for (int j = 0; j < data[1]; ++j) {
     element_shape_.push_back(data[2 + j]);
   }
+  int tensors_num = data[2 + data[1]];
+  tensors_.resize(tensors_num);
+  int tensor_index = 2 + data[1] + 1;
+  for (int i = 0; i < tensors_num; i++) {
+    int tensor_dims_size = data[tensor_index++];
+    std::vector<int> shape(tensor_dims_size);
+    for (int j = 0; j < tensor_dims_size; j++) {
+      shape[j] = data[tensor_index++];
+    }
+    tensors_[i] = new (std::nothrow) Tensor(tensors_data_type_, shape);
+    if (tensors_[i] == nullptr) {
+      MS_LOG(ERROR) << "new Tensor failed";
+      return RET_NULL_PTR;
+    }
+  }
   return RET_OK;
 }
-}  // namespace lite
-}  // namespace mindspore
+
+bool TensorList::IsConst() const { return this->category_ == CONST_TENSOR || this->category_ == CONST_SCALAR; }
+
+}  // namespace mindspore::lite

@@ -5,6 +5,7 @@
 - [Dataset](#dataset)
 - [Environment Requirements](#environment-requirements)
 - [Quick Start](#quick-start)
+- [Run in docker](#Run-in-docker)
 - [Script Description](#script-description)
     - [Script and Sample Code](#script-and-sample-code)
     - [Script Parameters](#script-parameters)
@@ -55,6 +56,8 @@ Note that you can run the scripts based on the dataset mentioned in original pap
     - Prepare hardware environment with Ascend processor. If you want to try Ascend, please send the [application form](https://obs-9be7.obs.cn-east-2.myhuaweicloud.com/file/other/Ascend%20Model%20Zoo%E4%BD%93%E9%AA%8C%E8%B5%84%E6%BA%90%E7%94%B3%E8%AF%B7%E8%A1%A8.docx) to ascend@huawei.com. Once approved, you can get the resources.
 - Framework
     - [MindSpore](https://gitee.com/mindspore/mindspore)
+- Docker base image
+    - [Ascend Hub](ascend.huawei.com/ascendhub/#/home)
 - For more information, please check the resources below:
     - [MindSpore Tutorials](https://www.mindspore.cn/tutorial/training/en/master/index.html)
     - [MindSpore Python API](https://www.mindspore.cn/doc/api_python/en/master/index.html)
@@ -120,6 +123,58 @@ pip install mmcv=0.2.14
    Note:
    1. VALIDATION_JSON_FILE is a label json file for evaluation.
 
+5. Execute inference script.
+   After training, you can start inference as follows:
+
+   ```shell
+   # inference
+   bash run_infer_310.sh [AIR_PATH] [DATA_PATH] [ANN_FILE_PATH]
+   ```
+
+   Note:
+   1. AIR_PATH is a model file, exported by export script file on the Ascend910 environment.
+   2. ANN_FILE_PATH is a annotation file for inference.
+
+# Run in docker
+
+1. Build docker images
+
+```shell
+# build docker
+docker build -t maskrcnn:20.1.0 . --build-arg FROM_IMAGE_NAME=ascend-mindspore-arm:20.1.0
+```
+
+2. Create a container layer over the created image and start it
+
+```shell
+# start docker
+bash scripts/docker_start.sh maskrcnn:20.1.0 [DATA_DIR] [MODEL_DIR]
+```
+
+3. Train
+
+```shell
+# standalone training
+bash run_standalone_train.sh [PRETRAINED_CKPT]
+
+# distributed training
+bash run_distribute_train.sh [RANK_TABLE_FILE] [PRETRAINED_CKPT]
+```
+
+4. Eval
+
+```shell
+# Evaluation
+bash run_eval.sh [VALIDATION_JSON_FILE] [CHECKPOINT_PATH]
+```
+
+5. Inference.
+
+   ```shell
+   # inference
+   bash run_infer_310.sh [AIR_PATH] [DATA_PATH] [ANN_FILE_PATH]
+   ```
+
 # [Script Description](#contents)
 
 ## [Script and Sample Code](#contents)
@@ -128,9 +183,11 @@ pip install mmcv=0.2.14
 .
 └─MaskRcnn
   ├─README.md                             # README
+  ├─ascend310_infer                       #application for 310 inference
   ├─scripts                               # shell script
     ├─run_standalone_train.sh             # training in standalone mode(1pcs)
     ├─run_distribute_train.sh             # training in parallel mode(8 pcs)
+    ├─run_infer_310.sh                    #shell script for 310 inference
     └─run_eval.sh                         # evaluation
   ├─src
     ├─maskrcnn
@@ -146,13 +203,16 @@ pip install mmcv=0.2.14
       ├─resnet50.py                       # backbone network
       ├─roi_align.py                      # roi align network
       └─rpn.py                            # reagion proposal network
+    ├─aipp.cfg                            #aipp config file
     ├─config.py                           # network configuration
     ├─dataset.py                          # dataset utils
     ├─lr_schedule.py                      # leanring rate geneatore
     ├─network_define.py                   # network define for maskrcnn
     └─util.py                             # routine operation
   ├─mindspore_hub_conf.py                 # mindspore hub interface
+  ├─export.py                             #script to export AIR,MINDIR,ONNX model
   ├─eval.py                               # evaluation scripts
+  ├─postprogress.py                       #post process for 310 inference
   └─train.py                              # training scripts
 ```
 
@@ -336,9 +396,37 @@ bash run_standalone_train.sh [PRETRAINED_MODEL]
 bash run_distribute_train.sh [RANK_TABLE_FILE] [PRETRAINED_MODEL]
 ```
 
-> hccl.json which is specified by RANK_TABLE_FILE is needed when you are running a distribute task. You can generate it by using the [hccl_tools](https://gitee.com/mindspore/mindspore/tree/master/model_zoo/utils/hccl_tools).
-> As for PRETRAINED_MODEL, if not set, the model will be trained from the very beginning. Ready-made pretrained_models are not available now. Stay tuned.
-> This is processor cores binding operation regarding the `device_num` and total processor numbers. If you are not expect to do it, remove the operations `taskset` in `scripts/run_distribute_train.sh`
+- Notes
+1. hccl.json which is specified by RANK_TABLE_FILE is needed when you are running a distribute task. You can generate it by using the [hccl_tools](https://gitee.com/mindspore/mindspore/tree/master/model_zoo/utils/hccl_tools).
+2. As for PRETRAINED_MODEL，it should be a trained ResNet50 checkpoint. If not set, the model will be trained from the very beginning. If you need to load Ready-made pretrained MaskRcnn checkpoint, you may make changes to the train.py script as follows.
+
+```python
+# Comment out the following code
+#   load_path = args_opt.pre_trained
+#    if load_path != "":
+#        param_dict = load_checkpoint(load_path)
+#        for item in list(param_dict.keys()):
+#            if not item.startswith('backbone'):
+#                param_dict.pop(item)
+#        load_param_into_net(net, param_dict)
+
+# Add the following codes after optimizer definition since the FasterRcnn checkpoint includes optimizer parameters：
+    lr = Tensor(dynamic_lr(config, rank_size=device_num, start_steps=config.pretrain_epoch_size * dataset_size),
+                mstype.float32)
+    opt = Momentum(params=net.trainable_params(), learning_rate=lr, momentum=config.momentum,
+                   weight_decay=config.weight_decay, loss_scale=config.loss_scale)
+
+    if load_path != "":
+        param_dict = load_checkpoint(load_path)
+        if config.pretrain_epoch_size == 0:
+            for item in list(param_dict.keys()):
+                if item in ("global_step", "learning_rate") or "rcnn.cls" in item or "rcnn.mask" in item:
+                    param_dict.pop(item)
+        load_param_into_net(net, param_dict)
+        load_param_into_net(opt, param_dict)
+```
+
+3. This is processor cores binding operation regarding the `device_num` and total processor numbers. If you are not expect to do it, remove the operations `taskset` in `scripts/run_distribute_train.sh`
 
 ### [Training Result](#content)
 
@@ -403,6 +491,62 @@ Accumulating evaluation results...
  Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.285
  Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.490
  Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.586
+```
+
+## Model Export
+
+```shell
+python export.py --ckpt_file [CKPT_PATH] --device_target [DEVICE_TARGET] --file_format[EXPORT_FORMAT]
+```
+
+`EXPORT_FORMAT` shoule be in ["AIR", "ONNX", "MINDIR"]
+
+## Inference Process
+
+### Usage
+
+Before performing inference, the air file must bu exported by export script on the 910 environment.
+Current batch_ Size can only be set to 1. The inference process needs about 600G hard disk space to save the reasoning results.
+
+```shell
+# Ascend310 inference
+sh run_infer_310.sh [AIR_PATH] [DATA_PATH] [ANN_FILE_PATH]
+```
+
+### result
+
+Inference result is saved in current path, you can find result like this in acc.log file.
+
+```bash
+Evaluate annotation type *bbox*
+Accumulating evaluation results...
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.3368
+ Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.589
+ Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.394
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.218
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.411
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.476
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.305
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.489
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.514
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.323
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.562
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.657
+
+Evaluate annotation type *segm*
+Accumulating evaluation results...
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.323
+ Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.544
+ Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.336
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.147
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.353
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.479
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.278
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.422
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.439
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.248
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.478
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.594
 ```
 
 # Model Description

@@ -40,6 +40,7 @@ std::shared_ptr<DatasetNode> MnistNode::Copy() {
 void MnistNode::Print(std::ostream &out) const { out << Name(); }
 
 Status MnistNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   RETURN_IF_NOT_OK(ValidateDatasetDirParam("MnistNode", dataset_dir_));
 
   RETURN_IF_NOT_OK(ValidateDatasetSampler("MnistNode", sampler_));
@@ -49,7 +50,7 @@ Status MnistNode::ValidateParams() {
   return Status::OK();
 }
 
-Status MnistNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
+Status MnistNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   // Do internal Schema generation.
   auto schema = std::make_unique<DataSchema>();
   RETURN_IF_NOT_OK(schema->AddColumn(ColDescriptor("image", DataType(DataType::DE_UINT8), TensorImpl::kCv, 1)));
@@ -86,5 +87,20 @@ Status MnistNode::GetDatasetSize(const std::shared_ptr<DatasetSizeGetter> &size_
   return Status::OK();
 }
 
+Status MnistNode::to_json(nlohmann::json *out_json) {
+  nlohmann::json args, sampler_args;
+  RETURN_IF_NOT_OK(sampler_->to_json(&sampler_args));
+  args["sampler"] = sampler_args;
+  args["num_parallel_workers"] = num_workers_;
+  args["dataset_dir"] = dataset_dir_;
+  args["usage"] = usage_;
+  if (cache_ != nullptr) {
+    nlohmann::json cache_args;
+    RETURN_IF_NOT_OK(cache_->to_json(&cache_args));
+    args["cache"] = cache_args;
+  }
+  *out_json = args;
+  return Status::OK();
+}
 }  // namespace dataset
 }  // namespace mindspore

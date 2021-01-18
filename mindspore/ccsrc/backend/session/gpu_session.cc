@@ -177,17 +177,19 @@ void GPUSession::GraphKernelOptimize(const std::shared_ptr<KernelGraph> &kernel_
   }
   auto optimizer = std::make_shared<opt::GraphOptimizer>();
   auto pm = std::make_shared<opt::PassManager>("graph_kernel_pm");
-  std::vector<PrimitivePtr> black_list = {prim::kPrimReshape, prim::kPrimCast};
+  std::vector<PrimitivePtr> duplicated_ops = {prim::kPrimReshape, prim::kPrimExpandDims, prim::kPrimCast};
   pm->AddPass(std::make_shared<opt::GraphKernelExpander>());
-  pm->AddPass(std::make_shared<opt::ShapeOpsSplitter>());
+  pm->AddPass(std::make_shared<opt::ShapeOpsSplitter>(duplicated_ops));
   pm->AddPass(std::make_shared<opt::BasicOpsFusion>());
   pm->AddPass(std::make_shared<opt::EliminateRedundantOutput>());
-  pm->AddPass(std::make_shared<opt::GraphKernelCSE>(black_list));
+  pm->AddPass(std::make_shared<opt::GraphKernelCSE>(duplicated_ops));
   pm->AddPass(std::make_shared<opt::ArithmeticSimplify>());
-  pm->AddPass(std::make_shared<opt::GraphKernelCSE>(black_list));
+  pm->AddPass(std::make_shared<opt::GraphKernelCSE>(duplicated_ops));
   pm->AddPass(std::make_shared<opt::TensorPromotion>());
   pm->AddPass(std::make_shared<opt::GraphKernelSplitter>());
   pm->AddPass(std::make_shared<opt::GraphKernelCSE>());
+  // The CSE may output a graph with repeated outputs.
+  pm->AddPass(std::make_shared<opt::EliminateRedundantOutput>());
   // After Simplify and Splitter, a lot of redundant getitem/maketuple
   // will be exposed, use GetitemTuple Pass to delete them.
   pm->AddPass(std::make_shared<opt::GetitemTuple>());
@@ -416,8 +418,7 @@ void GPUSession::BuildOpImpl(const OpRunInfo &op_run_info, const GraphInfo &grap
   SelectKernel(kernel_graph);
   RunOpHardwareOptimize(kernel_graph);
   StartKernelRT();
-  // Hide NopOp from execution graph
-  opt::HideNopNode(kernel_graph.get());
+  RunOpHideNopNode(kernel_graph);
   BuildKernel(kernel_graph);
   run_op_graphs_[graph_info] = kernel_graph;
 }
@@ -432,8 +433,7 @@ void GPUSession::RunOpImpl(const GraphInfo &graph_info, OpRunInfo *op_run_info,
   // run op
   auto kernel_graph = run_op_graphs_[graph_info];
   MS_EXCEPTION_IF_NULL(kernel_graph);
-  // Remove NopOp from execution graph
-  opt::RemoveNopNode(kernel_graph.get());
+  RunOpRemoveNopNode(kernel_graph);
   RunOpAllocateMemory(*input_tensors, kernel_graph.get());
   // Execute the computation
   LoadInputData(kernel_graph, *input_tensors);
@@ -502,7 +502,7 @@ void GPUSession::SyncStream() {
   MS_EXCEPTION_IF_NULL(runtime_instance);
   auto ret = runtime_instance->SyncStream();
   if (!ret) {
-    MS_LOG(ERROR) << "Sync stream error!";
+    MS_LOG(EXCEPTION) << "Sync stream error!";
   }
 }
 }  // namespace gpu

@@ -52,6 +52,20 @@ def _init_device_info():
                 if cuda_id != rank_id:
                     rank_id = cuda_id
         _config.set_rank_id(rank_id)
+    elif context.get_context("device_target") == "Ascend":
+        # Ascend is a special scenario, we'd better get rank info from env
+        env_rank_size = os.getenv("RANK_SIZE", None)
+        env_rank_id = os.getenv("RANK_ID", None)
+        if env_rank_size and env_rank_id:
+            # Ascend only support multi-process scenario
+            rank_size = int(env_rank_size.strip())
+            rank_id = int(env_rank_id.strip())
+            if rank_size > 1:
+                _config.set_rank_id(rank_id)
+            # Now single process under ascend mode doesn't support numa bind for performance consideration.
+            if _config.get_numa_enable() is True and rank_size == 1:
+                raise ValueError("single process under Ascend mode doesn't support numa bind for "
+                                 "performance consideration.")
 
 
 def set_seed(seed):
@@ -71,8 +85,6 @@ def set_seed(seed):
         ValueError: If seed is invalid (< 0 or > MAX_UINT_32).
 
     Examples:
-        >>> import mindspore.dataset as ds
-        >>>
         >>> # Set a new global configuration value for the seed value.
         >>> # Operations with randomness will use the seed value to generate random values.
         >>> ds.config.set_seed(1000)
@@ -106,8 +118,6 @@ def set_prefetch_size(size):
         ValueError: If prefetch_size is invalid (<= 0 or > MAX_INT_32).
 
     Examples:
-        >>> import mindspore.dataset as ds
-        >>>
         >>> # Set a new global configuration value for the prefetch size.
         >>> ds.config.set_prefetch_size(1000)
     """
@@ -137,8 +147,6 @@ def set_num_parallel_workers(num):
         ValueError: If num_parallel_workers is invalid (<= 0 or > MAX_INT_32).
 
     Examples:
-        >>> import mindspore.dataset as ds
-        >>>
         >>> # Set a new global configuration value for the number of parallel workers.
         >>> # Now parallel dataset operators will run with 8 workers.
         >>> ds.config.set_num_parallel_workers(8)
@@ -159,6 +167,37 @@ def get_num_parallel_workers():
     return _config.get_num_parallel_workers()
 
 
+def set_numa_enable(numa_enable):
+    """
+    Set the default state of numa enabled.
+
+    Args:
+        numa_enable (bool): Whether to use numa bind feature.
+
+    Raises:
+        TypeError: If numa_enable is not a boolean data type.
+
+    Examples:
+        >>> # Set a new global configuration value for the state of numa enabled.
+        >>> # Now parallel dataset operators will run with numa bind function
+        >>> ds.config.set_numa_enable(True)
+    """
+    if not isinstance(numa_enable, bool):
+        raise TypeError("numa_enable must be a boolean dtype.")
+    _config.set_numa_enable(numa_enable)
+
+
+def get_numa_enable():
+    """
+    Get the default state of numa enabled.
+    This is the DEFAULT numa enabled value used for the all process.
+
+    Returns:
+        boolean, the default state of numa enabled
+    """
+    return _config.get_numa_enable()
+
+
 def set_monitor_sampling_interval(interval):
     """
     Set the default interval (in milliseconds) for monitor sampling.
@@ -170,8 +209,6 @@ def set_monitor_sampling_interval(interval):
         ValueError: If interval is invalid (<= 0 or > MAX_INT_32).
 
     Examples:
-        >>> import mindspore.dataset as ds
-        >>>
         >>> # Set a new global configuration value for the monitor sampling interval.
         >>> ds.config.set_monitor_sampling_interval(100)
     """
@@ -207,8 +244,6 @@ def set_auto_num_workers(enable):
         TypeError: If enable is not of boolean type.
 
     Examples:
-        >>> import mindspore.dataset as ds
-        >>>
         >>> # Enable auto_num_worker feature, this might override the num_parallel_workers passed in by user
         >>> ds.config.set_auto_num_workers(True)
     """
@@ -247,7 +282,7 @@ def get_auto_num_workers():
     Returns:
         Bool, whether auto num worker feature is turned on
     Examples:
-        >>> ds.config.get_auto_num_workers()
+        >>> num_workers = ds.config.get_auto_num_workers()
     """
     return _config.get_auto_num_workers()
 
@@ -264,8 +299,6 @@ def set_callback_timeout(timeout):
         ValueError: If timeout is invalid (<= 0 or > MAX_INT_32).
 
     Examples:
-        >>> import mindspore.dataset as ds
-        >>>
         >>> # Set a new global configuration value for the timeout value.
         >>> ds.config.set_callback_timeout(100)
     """
@@ -306,10 +339,8 @@ def load(file):
         RuntimeError: If file is invalid and parsing fails.
 
     Examples:
-        >>> import mindspore.dataset as ds
-        >>>
         >>> # Set new default configuration values according to values in the configuration file.
-        >>> ds.config.load("path/to/config/file")
+        >>> ds.config.load("/path/to/config_directory/config.cfg")
         >>> # example config file:
         >>> # {
         >>> #     "logFilePath": "/tmp",

@@ -32,6 +32,9 @@ SubsetRandomSamplerRT::SubsetRandomSamplerRT(int64_t num_samples, const std::vec
 
 // Initialized this Sampler.
 Status SubsetRandomSamplerRT::InitSampler() {
+  if (is_initialized) {
+    return Status::OK();
+  }
   CHECK_FAIL_RETURN_UNEXPECTED(
     num_rows_ > 0, "Invalid parameter, num_rows must be greater than 0, but got " + std::to_string(num_rows_) + ".\n");
 
@@ -51,6 +54,7 @@ Status SubsetRandomSamplerRT::InitSampler() {
   // We will shuffle the full set of id's, but only select the first num_samples_ of them later.
   std::shuffle(indices_.begin(), indices_.end(), rand_gen_);
 
+  is_initialized = true;
   return Status::OK();
 }
 
@@ -126,6 +130,24 @@ void SubsetRandomSamplerRT::SamplerPrint(std::ostream &out, bool show_all) const
     SamplerRT::SamplerPrint(out, show_all);
     // Then add our own info if any
   }
+}
+
+Status SubsetRandomSamplerRT::to_json(nlohmann::json *out_json) {
+  nlohmann::json args;
+  args["sampler_name"] = "SubsetRandomSampler";
+  args["indices"] = indices_;
+  args["num_samples"] = num_samples_;
+  if (this->HasChildSampler()) {
+    std::vector<nlohmann::json> children_args;
+    for (auto child : child_) {
+      nlohmann::json child_arg;
+      RETURN_IF_NOT_OK(child->to_json(&child_arg));
+      children_args.push_back(child_arg);
+    }
+    args["child_sampler"] = children_args;
+  }
+  *out_json = args;
+  return Status::OK();
 }
 }  // namespace dataset
 }  // namespace mindspore

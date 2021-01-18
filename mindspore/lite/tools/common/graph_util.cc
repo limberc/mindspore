@@ -272,18 +272,40 @@ STATUS RemoveTensor(schema::MetaGraphT *graphT, std::vector<uint32_t> toDeleteTe
         continue;
       }
     }
-    // update graph input indexes
+    // update graph input indices
     for (auto gInIdx = graphT->inputIndex.begin(); gInIdx != graphT->inputIndex.end(); gInIdx++) {
       if (*gInIdx > deleteIdx) {
         (*gInIdx)--;
       }
     }
-    // update graph output indexes
+    // update graph output indices
     for (auto gOutIdx = graphT->outputIndex.begin(); gOutIdx != graphT->outputIndex.end(); gOutIdx++) {
       if (*gOutIdx > deleteIdx) {
         (*gOutIdx)--;
       }
     }
+
+    for (auto &subgraph : graphT->subGraph) {
+      // update subgraph input indices
+      for (auto gInIdx = subgraph->inputIndices.begin(); gInIdx != subgraph->inputIndices.end(); gInIdx++) {
+        if (*gInIdx > deleteIdx) {
+          (*gInIdx)--;
+        }
+      }
+      // update subgraph output indices
+      for (auto gOutIdx = subgraph->outputIndices.begin(); gOutIdx != subgraph->outputIndices.end(); gOutIdx++) {
+        if (*gOutIdx > deleteIdx) {
+          (*gOutIdx)--;
+        }
+      }
+      // update subgraph output indices
+      for (auto idx = subgraph->tensorIndices.begin(); idx != subgraph->tensorIndices.end(); idx++) {
+        if (*idx > deleteIdx) {
+          (*idx)--;
+        }
+      }
+    }
+
     // update nodes indexes
     for (auto node_iter = graphT->nodes.begin(); node_iter != graphT->nodes.end(); node_iter++) {
       // update nodes input indexes
@@ -424,6 +446,11 @@ NodeIter InsertNodeBefore(schema::MetaGraphT *graphT, NodeIter existNodeIter, si
       MS_ASSERT(prim != nullptr);
       preTensor->dataType = prim->srcT;
       toAddTensor->dataType = prim->dstT;
+      if (prim->srcT == TypeId::kNumberTypeUInt8 && prim->dstT == TypeId::kNumberTypeInt8) {
+        preTensor->quantParams.front()->zeroPoint += 128;
+      } else if (prim->srcT == TypeId::kNumberTypeInt8 && prim->dstT == TypeId::kNumberTypeUInt8) {
+        toAddTensor->quantParams.front()->zeroPoint += 128;
+      }
     }
     graphT->allTensors.emplace_back(std::move(toAddTensor));
     size_t toAddTensorIdx = graphT->allTensors.size() - 1;
@@ -464,6 +491,11 @@ NodeIter InsertNodeBefore(schema::MetaGraphT *graphT, NodeIter existNodeIter, si
         MS_ASSERT(prim != nullptr);
         preTensor->dataType = prim->srcT;
         toAddTensor->dataType = prim->dstT;
+        if (prim->srcT == TypeId::kNumberTypeUInt8 && prim->dstT == TypeId::kNumberTypeInt8) {
+          preTensor->quantParams.front()->zeroPoint += 128;
+        } else if (prim->srcT == TypeId::kNumberTypeInt8 && prim->dstT == TypeId::kNumberTypeUInt8) {
+          toAddTensor->quantParams.front()->zeroPoint += 128;
+        }
       }
       graphT->allTensors.emplace_back(std::move(toAddTensor));
       size_t toAddTensorIdx = graphT->allTensors.size() - 1;
@@ -524,6 +556,11 @@ NodeIter InsertNodeAfter(schema::MetaGraphT *graphT, NodeIter existNodeIter, siz
       MS_ASSERT(prim != nullptr);
       postTensor->dataType = prim->srcT;
       toAddTensor->dataType = prim->dstT;
+      if (prim->srcT == TypeId::kNumberTypeInt8 && prim->dstT == TypeId::kNumberTypeUInt8) {
+        toAddTensor->quantParams.front()->zeroPoint += 128;
+      } else if (prim->srcT == TypeId::kNumberTypeUInt8 && prim->dstT == TypeId::kNumberTypeInt8) {
+        postTensor->quantParams.front()->zeroPoint += 128;
+      }
     }
     graphT->allTensors.emplace_back(std::move(toAddTensor));
     size_t toAddTensorIdx = graphT->allTensors.size() - 1;
@@ -591,6 +628,11 @@ NodeIter InsertNodeAfter(schema::MetaGraphT *graphT, NodeIter existNodeIter, siz
         MS_ASSERT(prim != nullptr);
         postTensor->dataType = prim->srcT;
         toAddTensor->dataType = prim->dstT;
+        if (prim->dstT == TypeId::kNumberTypeUInt8 && prim->srcT == TypeId::kNumberTypeInt8) {
+          toAddTensor->quantParams.front()->zeroPoint += 128;
+        } else if (prim->srcT == TypeId::kNumberTypeUInt8 && prim->dstT == TypeId::kNumberTypeInt8) {
+          postTensor->quantParams.front()->zeroPoint += 128;
+        }
       }
       graphT->allTensors.emplace_back(std::move(toAddTensor));
       size_t toAddTensorIdx = graphT->allTensors.size() - 1;
@@ -767,6 +809,31 @@ std::string GetModelName(const std::string &modelFile) {
   modelName = modelName.substr(modelName.find_last_of('/') + 1);
   modelName = modelName.substr(0, modelName.find_last_of('.'));
   return modelName;
+}
+
+int SetSubgraphTensorIndices(schema::MetaGraphT *meta_graphT) {
+  for (auto &subgraph : meta_graphT->subGraph) {
+    std::vector<uint32_t> subgraph_indices{};
+    for (auto &node_idx : subgraph->nodeIndices) {
+      auto &node = meta_graphT->nodes.at(node_idx);
+      for (auto &input_idx : node->inputIndex) {
+        if (IsContain(subgraph_indices, input_idx)) {
+          continue;
+        } else {
+          subgraph_indices.push_back(input_idx);
+        }
+      }
+      for (auto &output_idx : node->outputIndex) {
+        if (IsContain(subgraph_indices, output_idx)) {
+          continue;
+        } else {
+          subgraph_indices.push_back(output_idx);
+        }
+      }
+    }
+    subgraph->tensorIndices.assign(subgraph_indices.begin(), subgraph_indices.end());
+  }
+  return RET_OK;
 }
 }  // namespace lite
 }  // namespace mindspore

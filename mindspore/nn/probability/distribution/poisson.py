@@ -35,7 +35,7 @@ class Poisson(Distribution):
         name (str): The name of the distribution. Default: 'Poisson'.
 
     Supported Platforms:
-        ``Ascend``
+        ``Ascend`` ``GPU``
 
     Note:
         `rate` must be strictly greater than 0.
@@ -48,7 +48,7 @@ class Poisson(Distribution):
         >>> from mindspore import Tensor
         >>> # To initialize an Poisson distribution of the rate 0.5.
         >>> p1 = msd.Poisson([0.5], dtype=mindspore.float32)
-        >>> # An Poisson distribution can be initilized without arguments.
+        >>> # An Poisson distribution can be initialized without arguments.
         >>> # In this case, `rate` must be passed in through `args` during function calls.
         >>> p2 = msd.Poisson(dtype=mindspore.float32)
         >>>
@@ -66,30 +66,30 @@ class Poisson(Distribution):
         >>> # Similar calls can be made to other probability functions
         >>> # by replacing `prob` by the name of the function.
         >>> ans = p1.prob(value)
-        >>> print(ans)
-        [0.3032652  0.0758163  0.01263604]
+        >>> print(ans.shape)
+        (3,)
         >>> # Evaluate with respect to distribution b.
         >>> ans = p1.prob(value, rate_b)
-        >>> print(ans)
-        [0.16374607 0.0758163  0.00715008]
+        >>> print(ans.shape)
+        (3,)
         >>> # `rate` must be passed in during function calls.
         >>> ans = p2.prob(value, rate_a)
-        >>> print(ans)
-        [0.32928684 0.09878606 0.01975721]
+        >>> print(ans.shape)
+        (3,)
         >>> # Functions `mean`, `mode`, `sd`, and 'var' have the same arguments as follows.
         >>> # Args:
         >>> #     rate (Tensor): the rate of the distribution. Default: self.rate.
         >>> # Examples of `mean`, `sd`, `mode`, and `var` are similar.
         >>> ans = p1.mean() # return 2
-        >>> print(ans)
-        0.5
+        >>> print(ans.shape)
+        ()
         >>> ans = p1.mean(rate_b) # return 1 / rate_b
-        >>> print(ans)
-        [0.2 0.5 0.4]
+        >>> print(ans.shape)
+        (3,)
         >>> # `rate` must be passed in during function calls.
         >>> ans = p2.mean(rate_a)
-        >>> print(ans)
-        [0.6]
+        >>> print(ans.shape)
+        (1,)
         >>> # Examples of `sample`.
         >>> # Args:
         >>> #     shape (tuple): the shape of the sample. Default: ()
@@ -157,7 +157,7 @@ class Poisson(Distribution):
     @property
     def rate(self):
         """
-        Return `rate` of the distribution after casting to self.dtype.
+        Return `rate` of the distribution after casting to dtype.
         """
         return self._rate
 

@@ -69,6 +69,10 @@ namespace pipeline {
 using Tensor = mindspore::tensor::Tensor;
 using MetaTensor = mindspore::tensor::MetaTensor;
 using TensorOrderMap = std::map<std::string, std::shared_ptr<Tensor>>;
+using mindspore::abstract::AbstractDictionary;
+using mindspore::abstract::AbstractDictionaryPtr;
+using mindspore::abstract::AbstractList;
+using mindspore::abstract::AbstractListPtr;
 using mindspore::abstract::AbstractTensor;
 using mindspore::abstract::AbstractTensorPtr;
 using mindspore::abstract::AbstractTuple;
@@ -93,16 +97,25 @@ std::string GetBaseNameForIR(int64_t stage_idx, const std::string &action_name) 
   return oss.str();
 }
 
-void CheckArgIsTensor(const ValuePtr &arg, std::size_t idx) {
-  MS_EXCEPTION_IF_NULL(arg);
-  auto tensor_arg = arg->cast<TensorPtr>();
-  if (tensor_arg == nullptr) {
-    MS_EXCEPTION(TypeError) << "For 'graph mode', the " << idx << "th arg: " << arg->ToString() << " is not a tensor.";
-  }
-  if (tensor_arg->is_parameter()) {
-    MS_EXCEPTION(TypeError) << "The inputs could not be Parameter.";
-  }
+AbstractBasePtr ArgsToAbstract(const ValuePtr &value) {
+  MS_EXCEPTION_IF_NULL(value);
+  bool broaden = value->isa<MetaTensor>();
+  return abstract::FromValue(value, broaden);
 }
+
+std::string GetCompileExceptionInfo() {
+  std::ostringstream oss;
+  trace::TraceGraphEval();
+  trace::GetEvalStackInfo(oss);
+  if (oss.str().empty()) {
+    DebugInfoPtr debug_info = TraceManager::GetParseOrResolveDebugInfo();
+    if (debug_info != nullptr) {
+      oss << "\n\n# " << trace::GetDebugInfo(debug_info);
+    }
+  }
+  return oss.str();
+}
+
 }  // namespace
 
 py::tuple GenerateKey(const std::string &name, const std::unordered_map<std::string, py::object> &defaults) {
@@ -117,8 +130,7 @@ py::tuple GenerateKey(const std::string &name, const std::unordered_map<std::str
     if (!parse::ConvertData(arg.second, &converted)) {
       MS_LOG(EXCEPTION) << "GenerateKey convert arg failed";
     }
-    bool broaden = converted->isa<Tensor>() || converted->isa<MetaTensor>();
-    args_spec.push_back(abstract::FromValue(converted, broaden));
+    args_spec.push_back(ArgsToAbstract(converted));
   }
   if (g_args_cache.count(args_spec) == 0) {
     static int64_t key = 0;
@@ -304,7 +316,7 @@ void ExecutorPy::DelNetRes(const std::string &id) {
 
 void ExecutorPy::ClearRes() {
   MS_LOG(INFO) << "Clean executor resource!";
-  Resource::ClearPrimitivePyPythonObj();
+  Resource::mem_cleaner().ClearPrimitivePyPythonObj();
   executor_ = nullptr;
 }
 
@@ -484,11 +496,7 @@ bool ExecutorPy::CompileInner(const py::object &obj, const py::tuple &args, cons
     if (!succ) {
       MS_LOG(EXCEPTION) << "Args convert error";
     }
-    if (MsContext::GetInstance()->get_param<int>(MS_CTX_EXECUTION_MODE) == kGraphMode) {
-      CheckArgIsTensor(converted, i);
-    }
-    bool broaden = true;
-    args_spec.push_back(abstract::FromValue(converted, broaden));
+    args_spec.push_back(ArgsToAbstract(converted));
   }
 
   resource->set_args_spec(args_spec);
@@ -546,13 +554,10 @@ bool ExecutorPy::Compile(const py::object &obj, const py::tuple &args, const py:
     ret_value = CompileInner(obj, args, phase, use_vm);
   } catch (const py::error_already_set &ex) {
     // print function call stack info before release
-    std::ostringstream oss;
-    trace::TraceGraphEval();
-    trace::GetEvalStackInfo(oss);
-    // call py::print to output function call stack to STDOUT, in case of output the log to file, the user can see
-    // these info from screen, no need to open log file to find these info
-    py::print(oss.str());
-    MS_LOG(ERROR) << oss.str();
+    std::string exception_info = GetCompileExceptionInfo();
+    if (!exception_info.empty()) {
+      MS_LOG(ERROR) << exception_info;
+    }
     ReleaseResource(phase);
 
     // re-throw this exception to Python interpreter to handle it
@@ -814,9 +819,6 @@ py::object ExecutorPy::Run(const py::tuple &args, const py::object &phase) {
           if (!parse::ConvertData(args[i], &converted)) {
             MS_LOG(EXCEPTION) << "The " << i << "th arg convert failed.";
           }
-          if (!converted->isa<tensor::Tensor>()) {
-            MS_EXCEPTION(TypeError) << "The " << i << "th arg: " << converted->ToString() << " is not tensor.";
-          }
         }
       }
       return *ret_val;
@@ -913,7 +915,7 @@ bool InitExecDataset(const std::string &queue_name, int64_t iter_num, int64_t ba
   auto ms_context = MsContext::GetInstance();
   MS_EXCEPTION_IF_NULL(ms_context);
   if (!context::IsTsdOpened(ms_context) || !context::IsGeInited(ms_context)) {
-    (void)InitBackend();
+    (void)InitPipeline();
   }
 #endif
   if (iter_num == -1) {
@@ -1014,12 +1016,11 @@ void ResetOpId() { mindspore::id_generator::reset_id(); }
 
 void InitHccl() {
 #ifdef ENABLE_GE
-  (void)InitBackend();
+  (void)InitPipeline();
 #else
   mindspore::parse::python_adapter::set_python_env_flag(true);
   auto ms_context = MsContext::GetInstance();
   MS_EXCEPTION_IF_NULL(ms_context);
-  (void)context::OpenTsd(ms_context);
   uint32_t device_id = ms_context->get_param<uint32_t>(MS_CTX_DEVICE_ID);
   std::string device_name = ms_context->get_param<std::string>(MS_CTX_DEVICE_TARGET);
   ms_context->set_param<bool>(MS_CTX_ENABLE_HCCL, true);
@@ -1027,10 +1028,14 @@ void InitHccl() {
       ms_context->get_param<std::string>(MS_CTX_DEVICE_TARGET) == kAscendDevice) {
     auto runtime_instance = device::KernelRuntimeManager::Instance().GetKernelRuntime(device_name, device_id);
     MS_EXCEPTION_IF_NULL(runtime_instance);
+    runtime_instance->PreInit();
+    (void)context::OpenTsd(ms_context);
     if (!runtime_instance->Init()) {
       MS_LOG(ERROR) << "Kernel runtime init error.";
       return;
     }
+  } else {
+    (void)context::OpenTsd(ms_context);
   }
 #endif
 }
@@ -1060,9 +1065,32 @@ void ReleaseGeTsd() {
   }
 }
 
-void InitBackend() {
+void StartUpProfiling() {
+  auto ms_context = MsContext::GetInstance();
+  MS_EXCEPTION_IF_NULL(ms_context);
+  if (!ms_context->get_param<bool>(MS_CTX_ENABLE_PROFILING)) {
+    return;
+  }
+  MS_LOG(INFO) << "Startup profiling";
+  // Start up profiling before OpenTsd
+  uint32_t device_id = ms_context->get_param<uint32_t>(MS_CTX_DEVICE_ID);
+  std::string device_name = ms_context->get_param<std::string>(MS_CTX_DEVICE_TARGET);
+  if (ms_context->backend_policy() == "ms" &&
+      ms_context->get_param<std::string>(MS_CTX_DEVICE_TARGET) == kAscendDevice) {
+    auto runtime_instance = device::KernelRuntimeManager::Instance().GetKernelRuntime(device_name, device_id);
+    MS_EXCEPTION_IF_NULL(runtime_instance);
+    runtime_instance->PreInit();
+  }
+}
+
+void InitPipeline() {
+  // If previous pipeline exit with exception, memory cleaner's flags maybe unpredictable, so init when a new pipeline
+  // start.
+  pipeline::Resource::mem_cleaner().Init();
   // set python env flag
   mindspore::parse::python_adapter::set_python_env_flag(true);
+  // Startup profiling before open tsd
+  StartUpProfiling();
   // open tsd before ge initialize
   auto ms_context = MsContext::GetInstance();
   MS_EXCEPTION_IF_NULL(ms_context);
@@ -1085,10 +1113,10 @@ void ClearResAtexit() {
   session::ClearPythonParasMap();
 #if (ENABLE_CPU && (ENABLE_D || ENABLE_GPU))
   if (ps::Util::IsParamServerMode() && ps::Util::IsRoleOfWorker()) {
-    ps::worker.Finalize();
     if (ps::PsDataPrefetch::GetInstance().cache_enable()) {
       ps::ps_cache_instance.Finalize();
     }
+    ps::worker.Finalize();
   }
 #endif
   ad::g_k_prims.clear();

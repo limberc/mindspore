@@ -34,7 +34,11 @@ Status RandomAccessOp::GetNumRowsInDataset(int64_t *num) const {
 }
 
 SamplerRT::SamplerRT(int64_t num_samples, int64_t samples_per_buffer)
-    : num_rows_(0), num_samples_(num_samples), samples_per_buffer_(samples_per_buffer), col_desc_(nullptr) {}
+    : num_rows_(0),
+      num_samples_(num_samples),
+      samples_per_buffer_(samples_per_buffer),
+      col_desc_(nullptr),
+      is_initialized(false) {}
 
 Status SamplerRT::HandshakeRandomAccessOp(const RandomAccessOp *op) {
   std::shared_ptr<SamplerRT> child_sampler;
@@ -133,16 +137,18 @@ Status SamplerRT::SetNumSamples(int64_t num_samples) {
 int64_t SamplerRT::GetNumSamples() { return num_samples_; }
 
 int64_t SamplerRT::CalculateNumSamples(int64_t num_rows) {
-  int64_t childs = num_rows;
+  int64_t child_num_rows = num_rows;
   if (!child_.empty()) {
-    childs = child_[0]->CalculateNumSamples(num_rows);
+    child_num_rows = child_[0]->CalculateNumSamples(num_rows);
   }
 
-  return (num_samples_ > 0) ? std::min(childs, num_samples_) : childs;
+  return (num_samples_ > 0) ? std::min(child_num_rows, num_samples_) : child_num_rows;
 }
 
 Status SamplerRT::SetNumRowsInDataset(int64_t num_rows) {
-  CHECK_FAIL_RETURN_UNEXPECTED(num_rows > 0, "Invalid parameter, num_rows must be greater than 0.");
+  CHECK_FAIL_RETURN_UNEXPECTED(
+    num_rows > 0,
+    "Invalid data, data rows of input dataset must not be less than or equal to 0, please check the input dataset.");
   num_rows_ = num_rows;
   return Status::OK();
 }

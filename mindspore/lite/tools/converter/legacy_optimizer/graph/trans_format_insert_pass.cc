@@ -44,6 +44,7 @@ bool TransOpInsertPass::CanFusion(schema::MetaGraphT *graph, const std::unique_p
     MS_ASSERT(pre_node->primitive->value != nullptr);
     if (pre_type_ == kNONE) {
       if (pre_node->primitive->value.type == schema::PrimitiveType_Transpose) {
+        MS_ASSERT(pre_node->primitive->value.AsTranspose() != nullptr);
         if (pre_node->primitive->value.AsTranspose()->perm == nchw2nhwc_perm) {
           pre_type_ = kNCHW2NHWC;
         } else if (pre_node->primitive->value.AsTranspose()->perm == nhwc2nchw_perm) {
@@ -206,6 +207,10 @@ STATUS TransOpInsertPass::Run(schema::MetaGraphT *graph) {
           continue;
         }
 #endif
+        auto &input_tensor = graph->allTensors.at((*iter)->inputIndex[i]);
+        if (input_tensor->nodeType == NodeType_ValueNode && input_tensor->dims.size() < 4) {
+          continue;
+        }
         iter = InsertFormatTransNode(graph, iter, kBefore, i, pre_insert_trans_type_, &status);
         if (status != RET_OK) {
           MS_LOG(ERROR) << "Insert" << pre_insert_trans_type_ << "before " << (*iter)->name << " failed";

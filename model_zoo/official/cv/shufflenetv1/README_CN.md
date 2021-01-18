@@ -67,6 +67,7 @@ ShuffleNetV1的核心部分被分成三个阶段，每个阶段重复堆积了�
     ├─crossentropysmooth.py                   # 损失函数定义
     ├─lr_generator.py                         # 学习率生成函数
   ├─train.py                                  # 网络训练脚本
+  ├─export.py                                 # 模型格式转换脚本
   └─eval.py                                   # 网络评估脚本
 ```
 
@@ -166,7 +167,7 @@ result:{'Loss': 2.0479587888106323, 'Top_1_Acc': 0.7385817307692307, 'Top_5_Acc'
 | 训练总时间 (8p)             | 7.0h                                    |
 | 评估总时间                  | 99s                                    |
 | 参数量 (M)                 | 44M                                   |
-| 脚本                       | [链接](https://gitee.com/mindspore/mindspore/tree/master/model_zoo/official/cv/ShuffleNetV1) |
+| 脚本                       | [链接](https://gitee.com/mindspore/mindspore/tree/master/model_zoo/official/cv/shufflenetv1) |
 
 # 随机情况的描述
 

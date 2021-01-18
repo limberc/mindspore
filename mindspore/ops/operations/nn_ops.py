@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -260,7 +260,8 @@ class Softsign(PrimitiveWithInfer):
     The function is shown as follows:
 
     .. math::
-        \text{output} = \frac{\text{input_x}}{1 + \left| \text{input_x} \right|},
+
+        \text{SoftSign}(x) = \frac{x}{ 1 + |x|}
 
     Inputs:
         - **input_x** (Tensor) - The input tensor whose data type must be float16 or float32.
@@ -331,6 +332,10 @@ class ReLU(PrimitiveWithCheck):
 class ReLU6(PrimitiveWithInfer):
     r"""
     Computes ReLU (Rectified Linear Unit) upper bounded by 6 of input tensors element-wise.
+
+    .. math::
+
+        \text{ReLU6}(x) = \min(\max(0,x), 6)
 
     It returns :math:`\min(\max(0,x), 6)` element-wise.
 
@@ -437,15 +442,12 @@ class Elu(PrimitiveWithInfer):
     r"""
     Computes exponential linear:
 
-    if x < 0:
-
     .. math::
-        \text{x} = \alpha * (\exp(\text{x}) - 1)
 
-    if x >= 0:
-
-    .. math::
-        \text{x} = \text{x}
+        \text{x} = \begin{cases}
+        \alpha * (\exp(\text{x}) - 1), & \text{if x} < \text{0;}\\
+        \text{x}, & \text{if x} >= \text{0.}
+        \end{cases}
 
     The data type of input tensor must be float.
 
@@ -857,6 +859,119 @@ class FusedBatchNormEx(PrimitiveWithInfer):
         return (input_x, scale, scale, scale, scale, scale)
 
 
+class InstanceNorm(PrimitiveWithInfer):
+    r"""
+    Instance normalization over a 4D input.
+
+    This operator applies Instance Normalization over a 4D input (a mini-batch of 2D inputs with
+    additional channel dimension) as described in the paper `Instance Normalization: The Missing Ingredient for
+    Fast Stylization <https://arxiv.org/abs/1607.08022>`_. It rescales and recenters the feature using a mini-batch
+    of data and the learned parameters which can be described in the following formula.
+
+    .. math::
+        y = \frac{x - mean}{\sqrt{variance + \epsilon}} * \gamma + \beta
+
+    where :math:`\gamma` is scale, :math:`\beta` is bias, :math:`\epsilon` is epsilon.
+
+    Args:
+        is_training (bool): Is training or inference. Default: True.
+        epsilon (float): A small value added for numerical stability. Default: 1e-5.
+        momentum (float): The hyper parameter to compute moving average for running_mean and running_var
+            (e.g. :math:`new\_running\_mean = momentum * running\_mean + (1 - momentum) * current\_mean`).
+            Momentum value must be [0, 1]. Default: 0.1.
+        data_format (str): The optional value for data format, is 'NCHW'. Default: "NCHW".
+
+    Inputs:
+        - **input_x** (Tensor) - The input of InstanceNorm, Tensor of shape :math:`(N, C)`,
+          data type: float16 or float32.
+        - **gamma** (Parameter) - scale, Tensor of shape :math:`(C,)`,
+          data type: float32.
+        - **beta** (Parameter) - bias, Tensor of shape :math:`(C,)`,
+          data type: float32.
+        - **mean** (Parameter) - mean value, Tensor of shape :math:`(C,)`, data type: float32.
+        - **variance** (Parameter) - variance value, Tensor of shape :math:`(C,)`, data type: float32.
+
+    Outputs:
+        Tuple of 3 Tensors, the normalized input, the updated parameters.
+
+        - **output_x** (Tensor) - The output of InstanceNorm, same type and shape as the `input_x`.
+        - **updated_moving_mean** (Tensor) - Updated mean value, Tensor of shape :math:`(NC,)`, data type: float32.
+        - **updated_moving_variance** (Tensor) - Updated variance value, Tensor of shape :math:`(NC,)`,
+          data type: float32.
+
+    Supported Platforms:
+        ``GPU``
+
+    Raise:
+        TypeError: If any validator check fails.
+
+    Examples:
+        >>> import mindspore
+        >>> import mindspore.nn as nn
+        >>> import numpy as np
+        >>> from mindspore import Parameter
+        >>> from mindspore import Tensor
+        >>> from mindspore.ops import operations as ops
+        >>> class InstanceNormNet(nn.Cell):
+        >>>     def __init__(self):
+        >>>         super(InstanceNormNet, self).__init__()
+        >>>         self.instance_norm = ops.InstanceNorm()
+        >>>         self.gamma = Parameter(Tensor(np.ones([64]), mindspore.float32), name="gamma")
+        >>>         self.beta = Parameter(Tensor(np.ones([64]), mindspore.float32), name="beta")
+        >>>         self.mean = Parameter(Tensor(np.ones([64]), mindspore.float32), name="mean")
+        >>>         self.variance = Parameter(Tensor(np.ones([64]), mindspore.float32), name="variance")
+        >>>
+        >>>     def construct(self, input_x):
+        >>>         out = self.instance_norm(input_x, self.gamma, self.beta, self.mean, self.variance)
+        >>>         return out
+        >>>
+        >>> input_x = Tensor(np.ones([128, 64, 32, 64]), mindspore.float32)
+        >>> net = InstanceNormNet()
+        >>> output = net(input_x)
+        >>> result = output[0].shape
+        >>> print(result)
+        (128, 64, 32, 64)
+    """
+    __mindspore_signature__ = (
+        sig.make_sig('input_x', dtype=sig.sig_dtype.T2),
+        sig.make_sig('gamma', sig.sig_rw.RW_WRITE, dtype=sig.sig_dtype.T),
+        sig.make_sig('beta', sig.sig_rw.RW_WRITE, dtype=sig.sig_dtype.T),
+        sig.make_sig('mean', sig.sig_rw.RW_WRITE, dtype=sig.sig_dtype.T),
+        sig.make_sig('variance', sig.sig_rw.RW_WRITE, dtype=sig.sig_dtype.T),
+    )
+
+    @prim_attr_register
+    def __init__(self, is_training=True, epsilon=1e-5, momentum=0.1):
+        self.init_prim_io_names(inputs=['x', 'gamma', 'beta', 'mean', 'variance'],
+                                outputs=['y', 'save_mean', 'save_variance'])
+        self.is_training = validator.check_bool(is_training, self.name)
+        self.epsilon = validator.check_float_range(epsilon, 0, 1, Rel.INC_RIGHT, 'epsilon', self.name)
+        self.momentum = validator.check_float_range(momentum, 0, 1, Rel.INC_BOTH, 'momentum', self.name)
+        self._update_parameter = True
+
+    def infer_shape(self, input_x, gamma, beta, mean, variance):
+        input_shape_norm = input_x
+        validator.check_equal_int(len(gamma), 1, "gamma rank", self.name)
+        validator.check("gamma shape", gamma, "beta shape", beta, Rel.EQ, self.name)
+        validator.check("gamma shape[0]", gamma[0], "input channel", input_shape_norm[1], Rel.EQ, self.name)
+        validator.check_equal_int(len(mean), 1, "mean rank", self.name)
+
+        validator.check("mean shape", mean, "variance shape", variance, Rel.EQ, self.name)
+        validator.check("mean shape", mean, "gamma shape", gamma, Rel.EQ, self.name)
+        save_mean_shape = gamma
+        save_mean_shape[0] = save_mean_shape[0] * input_shape_norm[0]
+        return (input_x, save_mean_shape, save_mean_shape)
+
+    def infer_dtype(self, input_x, gamma, beta, mean, variance):
+        validator.check_tensor_dtype_valid("input_x", input_x, [mstype.float16, mstype.float32], self.name)
+        args = {"gamma": gamma, "beta": beta}
+        validator.check_tensors_dtypes_same_and_valid(args, [mstype.float32], self.name)
+        args_moving = {"mean": mean, "variance": variance}
+        valid_dtypes = [mstype.tensor_type(mstype.float32)]
+        validator.check_types_same_and_valid(args_moving, valid_dtypes, self.name)
+        return (input_x, gamma, gamma)
+
+
 class BNTrainingReduce(PrimitiveWithInfer):
     """
     For the BatchNorm operation this operator update the moving averages for training and is used in conjunction with
@@ -1056,9 +1171,10 @@ class BatchNorm(PrimitiveWithInfer):
     """
 
     @prim_attr_register
-    def __init__(self, is_training=False, epsilon=1e-5, data_format="NCHW"):
+    def __init__(self, is_training=False, epsilon=1e-5, momentum=0.1, data_format="NCHW"):
         validator.check_value_type('is_training', is_training, (bool,), self.name)
         validator.check_float_range(epsilon, 0, 1, Rel.INC_RIGHT, 'epsilon', self.name)
+        validator.check_float_range(momentum, 0, 1, Rel.INC_BOTH, 'momentum', self.name)
         self.format = validator.check_string(data_format, ['NCHW', 'NHWC'], 'format', self.name)
         if context.get_context("device_target") != "GPU" and self.format == "NHWC":
             raise ValueError("NHWC format only support in GPU target.")
@@ -1091,7 +1207,7 @@ class BatchNorm(PrimitiveWithInfer):
         return (input_x, scale, bias, input_x, input_x)
 
 
-class Conv2D(PrimitiveWithInfer):
+class Conv2D(PrimitiveWithCheck):
     r"""
     2D convolution layer.
 
@@ -1198,65 +1314,16 @@ class Conv2D(PrimitiveWithInfer):
         self.add_prim_attr('groups', self.group)
         self.add_prim_attr('offset_a', 0)
 
-    def infer_shape(self, x_shape, w_shape, b_shape=None):
+    def check_shape(self, x_shape, w_shape, b_shape=None):
         x_shape_norm = x_shape if self.format == "NCHW" else (x_shape[0], x_shape[3], x_shape[1], x_shape[2])
         w_shape_norm = w_shape if self.format == "NCHW" else (w_shape[0], w_shape[3], w_shape[1], w_shape[2])
-
         validator.check_equal_int(len(w_shape_norm), 4, "weight rank", self.name)
         validator.check_equal_int(len(x_shape_norm), 4, "x rank", self.name)
-        validator.check(f"x_shape[1] / group", x_shape_norm[1] // self.group, "w_shape[1]", w_shape_norm[1], \
-                        Rel.EQ, self.name)
-        validator.check('out_channel', self.out_channel, 'w_shape[0]', w_shape_norm[0], Rel.EQ, self.name)
-        validator.check('kernel_size', self.kernel_size, 'w_shape[2:4]', tuple(w_shape_norm[2:4]), Rel.EQ, self.name)
 
-        kernel_size_h = w_shape_norm[2]
-        kernel_size_w = w_shape_norm[3]
-
-        stride_h = self.stride[2]
-        stride_w = self.stride[3]
-        dilation_h = self.dilation[2]
-        dilation_w = self.dilation[3]
-
-        if self.pad_mode == "valid":
-            h_out = math.ceil((x_shape_norm[2] - dilation_h * (kernel_size_h - 1)) / stride_h)
-            w_out = math.ceil((x_shape_norm[3] - dilation_w * (kernel_size_w - 1)) / stride_w)
-            pad_top, pad_bottom, pad_left, pad_right = 0, 0, 0, 0
-        elif self.pad_mode == "same":
-            h_out = math.ceil(x_shape_norm[2] / stride_h)
-            w_out = math.ceil(x_shape_norm[3] / stride_w)
-
-            pad_needed_h = max(0, (h_out - 1) * stride_h + dilation_h * (kernel_size_h - 1) + 1 - x_shape_norm[2])
-            pad_top = math.floor(pad_needed_h / 2)
-            pad_bottom = pad_needed_h - pad_top
-
-            pad_needed_w = max(0, (w_out - 1) * stride_w + dilation_w * (kernel_size_w - 1) + 1 - x_shape_norm[3])
-            pad_left = math.floor(pad_needed_w / 2)
-            pad_right = pad_needed_w - pad_left
-        elif self.pad_mode == 'pad':
-            pad_top, pad_bottom, pad_left, pad_right = self.padding
-
-            h_out = 1 + (x_shape_norm[2] + pad_top + pad_bottom - kernel_size_h - (kernel_size_h - 1) \
-                         * (dilation_h - 1)) / stride_h
-            w_out = 1 + (x_shape_norm[3] + pad_left + pad_right - kernel_size_w - (kernel_size_w - 1) \
-                         * (dilation_w - 1)) / stride_w
-            h_out = math.floor(h_out)
-            w_out = math.floor(w_out)
-
-        self.pad_list = [pad_top, pad_bottom, pad_left, pad_right]
-        self.add_prim_attr('pad_list', (pad_top, pad_bottom, pad_left, pad_right))
-        out_channel = self.out_channel
-        out_shape = [x_shape_norm[0], out_channel, h_out, w_out] if self.format == "NCHW" else \
-            [x_shape_norm[0], h_out, w_out, out_channel]
-        _check_shape('output', out_shape, self.name)
-        return out_shape
-
-    def infer_dtype(self, x_dtype, w_dtype, b_dtype=None):
+    def check_dtype(self, x_dtype, w_dtype, b_dtype=None):
         args = {'x': x_dtype, 'w': w_dtype}
         valid_dtypes = [mstype.int8, mstype.int32, mstype.float16, mstype.float32]
         validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
-        if x_dtype.element_type() == mstype.int8:
-            return mstype.tensor_type(mstype.int32)
-        return x_dtype
 
 
 class DepthwiseConv2dNative(PrimitiveWithInfer):
@@ -1566,10 +1633,14 @@ class MaxPoolWithArgmax(_Pool):
         Tuple of 2 Tensors, representing the maxpool result and where the max values are generated.
 
         - **output** (Tensor) -  Maxpooling result, with shape :math:`(N, C_{out}, H_{out}, W_{out})`.
-        - **mask** (Tensor) -  Max values' index represented by the mask.
+          It has the same data type as `input`.
+        - **mask** (Tensor) -  Max values' index represented by the mask. Data type is int32.
+
+    Raises:
+        TypeError: If the input data type is not float16 or float32.
 
     Supported Platforms:
-        ``Ascend``
+        ``Ascend`` ``GPU``
 
     Examples:
         >>> input_tensor = Tensor(np.arange(1 * 3 * 3 * 4).reshape((1, 3, 3, 4)), mindspore.float32)
@@ -1885,7 +1956,7 @@ class TopK(PrimitiveWithInfer):
         - **indices** (Tensor) - The indices of values within the last dimension of input.
 
     Supported Platforms:
-        ``Ascend`` ``GPU``
+        ``Ascend`` ``GPU`` ``CPU``
 
     Examples:
         >>> topk = ops.TopK(sorted=True)
@@ -1893,7 +1964,8 @@ class TopK(PrimitiveWithInfer):
         >>> k = 3
         >>> values, indices = topk(input_x, k)
         >>> print((values, indices))
-        ([5.0, 4.0, 3.0], [4, 3, 2])
+        (Tensor(shape=[3], dtype=Float16, value= [ 5.0000e+00,  4.0000e+00,  3.0000e+00]), Tensor(shape=[3],
+          dtype=Int32, value= [4, 3, 2]))
     """
 
     @prim_attr_register
@@ -1914,6 +1986,69 @@ class TopK(PrimitiveWithInfer):
         return {'shape': (x_shape, x_shape),
                 'dtype': (x_dtype, mstype.int32),
                 'value': None}
+
+
+class NLLLoss(PrimitiveWithInfer):
+    r"""
+    Gets the negative log likelihood loss between logits and labels.
+
+    Args:
+        reduction (string): Apply specific reduction method to the output: 'none', 'mean', 'sum'. Default: "mean".
+
+    Inputs:
+        - **input** (Tensor) - Input logits, with shape :math:`(N, C)`. Data type only support float32 or float16.
+        - **target** (Tensor) - Ground truth labels, with shape :math:`(N)`. Data type only support int32.
+        - **weight** (Tensor) - The rescaling weight to each class, with shape :math:`(C)` and data type only
+                                support float32 or float16`.
+
+    Outputs:
+        Tuple of 2 tensors composed with `loss` and `total_weight`. when `reduction` is `none` and `input` is 2D
+        tensor, the `loss` shape is `(N,)`. Otherwise, the `loss` and the `total_weight` is a scalar. The data type
+        of `loss` and `total_weight` are same with `input's` and `weight's` respectively.
+
+    Supported Platforms:
+        ``Ascend``
+
+    Examples:
+        >>> input = Tensor(np.array([[0.5488135, 0.71518934],
+        >>>                          [0.60276335, 0.5448832],
+        >>>                          [0.4236548, 0.6458941]]).astype(np.float32))
+        >>> target = Tensor(np.array([0, 0, 0]).astype(np.int32))
+        >>> weight = Tensor(np.array([0.3834415, 0.79172504]).astype(np.float32))
+        >>> nll_loss = ops.NLLLoss(reduction="mean")
+        >>> loss, weight = nll_loss(input, target, weight)
+        >>> print(loss)
+        [-0.52507716]
+        >>> print(weight)
+        [1.1503246 0.79172504]
+    """
+
+    @prim_attr_register
+    def __init__(self, reduction="mean"):
+        """Initialize NLLLoss"""
+        self.init_prim_io_names(inputs=['x', 'target', "weight"], outputs=['loss'])
+        self.reduction = validator.check_string(reduction, ['none', 'sum', 'mean'], 'reduction', self.name)
+        self.add_prim_attr('reduction', self.reduction)
+
+    def infer_shape(self, x_shape, t_shape, w_shape):
+        validator.check_int(len(x_shape), [1, 2], Rel.IN, "x rank", self.name)
+        validator.check_int(len(t_shape), 1, Rel.EQ, "target rank", self.name)
+        validator.check_int(len(w_shape), 1, Rel.EQ, "weight rank", self.name)
+        validator.check(f"input_shape[0]", x_shape[0], "target_shape", t_shape[0], Rel.EQ, self.name)
+        if len(x_shape) == 1:
+            validator.check(f"input_shape[0]", x_shape[0], "weight_shape", w_shape[0], Rel.EQ, self.name)
+        else:
+            validator.check(f"input_shape[1]", x_shape[1], "weight_shape", w_shape[0], Rel.EQ, self.name)
+        if self.reduction == "none":
+            return t_shape, ()
+        return (), ()
+
+    def infer_dtype(self, x_dtype, t_dtype, w_dtype):
+        valid_dtypes = (mstype.float16, mstype.float32)
+        validator.check_tensor_dtype_valid("x_dtype", x_dtype, valid_dtypes, self.name)
+        validator.check_tensor_dtype_valid("t_dtype", t_dtype, mstype.int32, self.name)
+        validator.check_tensor_dtype_valid("w_dtype", w_dtype, valid_dtypes, self.name)
+        return x_dtype, w_dtype
 
 
 class SoftmaxCrossEntropyWithLogits(PrimitiveWithInfer):
@@ -2037,7 +2172,7 @@ class ApplyMomentum(PrimitiveWithInfer):
     Data type conversion of Parameter is not supported. RuntimeError exception will be thrown.
 
     Args:
-        use_locking (bool): Whether to enable a lock to protect the variable and accumlation tensors
+        use_locking (bool): Whether to enable a lock to protect the variable and accumulation tensors
                             from being updated. Default: False.
         use_nesterov (bool): Enable Nesterov momentum. Default: False.
         gradient_scale (float): The scale of the gradient. Default: 1.0.
@@ -2296,8 +2431,8 @@ class SGD(PrimitiveWithCheck):
     """
     Computes the stochastic gradient descent. Momentum is optional.
 
-    Nesterov momentum is based on the formula from On the importance of
-    initialization and momentum in deep learning.
+    Nesterov momentum is based on the formula from paper `On the importance of
+    initialization and momentum in deep learning <http://proceedings.mlr.press/v28/sutskever13.html>`_.
 
     Note:
         For details, please refer to `nn.SGD` source code.
@@ -2333,7 +2468,7 @@ class SGD(PrimitiveWithCheck):
         >>> stat = Tensor(np.array([1.5, -0.3, 0.2, -0.7]), mindspore.float32)
         >>> output = sgd(parameters, gradient, learning_rate, accum, momentum, stat)
         >>> print(output[0])
-        [ 1.9899   -0.4903   1.6952001  3.9801   ]
+        (Tensor(shape=[4], dtype=Float32, value= [ 1.98989999e+00, -4.90300000e-01,  1.69520009e+00,  3.98009992e+00]),)
     """
 
     @prim_attr_register
@@ -2944,7 +3079,7 @@ class Gelu(PrimitiveWithInfer):
 
 class FastGelu(PrimitiveWithInfer):
     r"""
-    fast Gaussian Error Linear Units activation function.
+    Fast Gaussian Error Linear Units activation function.
 
     FastGelu is defined as follows:
 
@@ -3120,7 +3255,8 @@ class LSTM(PrimitiveWithInfer):
     """
     Performs the Long Short-Term Memory (LSTM) on the input.
 
-    For detailed information, please refer to `nn.LSTM`.
+    For detailed information, please refer to `nn.LSTM
+    <https://www.mindspore.cn/doc/api_python/zh-CN/master/mindspore/nn/mindspore.nn.LSTM.html>`_.
 
     Supported Platforms:
         ``GPU`` ``CPU``
@@ -3228,14 +3364,13 @@ class SigmoidCrossEntropyWithLogits(PrimitiveWithInfer):
     r"""
     Uses the given logits to compute sigmoid cross entropy.
 
-    Note:
-        Sets input logits as `X`, input label as `Y`, output as `loss`. Then,
+    Sets input logits as `X`, input label as `Y`, output as `loss`. Then,
 
-        .. math::
-            p_{ij} = sigmoid(X_{ij}) = \frac{1}{1 + e^{-X_{ij}}}
+    .. math::
+        p_{ij} = sigmoid(X_{ij}) = \frac{1}{1 + e^{-X_{ij}}}
 
-        .. math::
-            loss_{ij} = -[Y_{ij} * ln(p_{ij}) + (1 - Y_{ij})ln(1 - p_{ij})]
+    .. math::
+        loss_{ij} = -[Y_{ij} * ln(p_{ij}) + (1 - Y_{ij})ln(1 - p_{ij})]
 
     Inputs:
         - **logits** (Tensor) - Input logits.
@@ -4315,22 +4450,21 @@ class BinaryCrossEntropy(PrimitiveWithInfer):
     r"""
     Computes the binary cross entropy between the target and the output.
 
-    Note:
-        Sets input as :math:`x`, input label as :math:`y`, output as :math:`\ell(x, y)`.
-        Let,
+    Sets input as :math:`x`, input label as :math:`y`, output as :math:`\ell(x, y)`.
+    Let,
 
-        .. math::
-            L = \{l_1,\dots,l_N\}^\top, \quad
-            l_n = - w_n \left[ y_n \cdot \log x_n + (1 - y_n) \cdot \log (1 - x_n) \right]
+    .. math::
+        L = \{l_1,\dots,l_N\}^\top, \quad
+        l_n = - w_n \left[ y_n \cdot \log x_n + (1 - y_n) \cdot \log (1 - x_n) \right]
 
-        Then,
+    Then,
 
-        .. math::
-            \ell(x, y) = \begin{cases}
-            L, & \text{if reduction} = \text{'none';}\\
-            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';}\\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
-            \end{cases}
+    .. math::
+        \ell(x, y) = \begin{cases}
+        L, & \text{if reduction} = \text{'none';}\\
+        \operatorname{mean}(L), & \text{if reduction} = \text{'mean';}\\
+        \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
+        \end{cases}
 
     Args:
         reduction (str): Specifies the reduction to be applied to the output.
@@ -5186,7 +5320,7 @@ class SparseApplyProximalAdagrad(PrimitiveWithCheck):
         - **grad** (Tensor) - A tensor of the same type as `var`, for the gradient.
         - **indices** (Tensor) - A tensor of indices in the first dimension of `var` and `accum`.
           If there are duplicates in `indices`, the behavior is undefined. Must be one of the
-          following types: int16, int32, int64, uint16, uint32, uint64.
+          following types: int32, int64.
 
     Outputs:
         Tuple of 2 tensors, the updated parameters.
@@ -5252,8 +5386,7 @@ class SparseApplyProximalAdagrad(PrimitiveWithCheck):
         validator.check_scalar_or_tensor_types_same({"lr": lr_dtype}, [mstype.float16, mstype.float32], self.name)
         validator.check_scalar_or_tensor_types_same({"l1": l1_dtype}, [mstype.float16, mstype.float32], self.name)
         validator.check_scalar_or_tensor_types_same({"l2": l2_dtype}, [mstype.float16, mstype.float32], self.name)
-        valid_dtypes = [mstype.int16, mstype.int32, mstype.int64,
-                        mstype.uint16, mstype.uint32, mstype.uint64]
+        valid_dtypes = [mstype.int32, mstype.int64]
         validator.check_tensor_dtype_valid('indices', indices_dtype, valid_dtypes, self.name)
 
 
@@ -5581,7 +5714,7 @@ class ApplyProximalGradientDescent(PrimitiveWithInfer):
 
     Inputs:
         - **var** (Parameter) - Variable tensor to be updated. With float32 or float16 data type.
-        - **alpha** (Union[Number, Tensor]) - Saling factor, must be a scalar. With float32 or float16 data type.
+        - **alpha** (Union[Number, Tensor]) - Scaling factor, must be a scalar. With float32 or float16 data type.
         - **l1** (Union[Number, Tensor]) - l1 regularization strength, must be scalar.
           With float32 or float16 data type.
         - **l2** (Union[Number, Tensor]) - l2 regularization strength, must be scalar.
@@ -5689,19 +5822,21 @@ class LARSUpdate(PrimitiveWithInfer):
         ...         super(Net, self).__init__()
         ...         self.lars = ops.LARSUpdate()
         ...         self.reduce = ops.ReduceSum()
+        ...         self.square = ops.Square()
         ...     def construct(self, weight, gradient):
-        ...         w_square_sum = self.reduce(ops.Square(weight))
-        ...         grad_square_sum = self.reduce(ops.Square(gradient))
+        ...         w_square_sum = self.reduce(self.square(weight))
+        ...         grad_square_sum = self.reduce(self.square(gradient))
         ...         grad_t = self.lars(weight, gradient, w_square_sum, grad_square_sum, 0.0, 1.0)
         ...         return grad_t
         ...
+        >>> np.random.seed(0)
         >>> weight = np.random.random(size=(2, 3)).astype(np.float32)
         >>> gradient = np.random.random(size=(2, 3)).astype(np.float32)
         >>> net = Net()
         >>> output = net(Tensor(weight), Tensor(gradient))
         >>> print(output)
-        [[1.0630977e-03 1.0647357e-03 1.0038106e-03]
-         [2.9038603e-04 5.9235965e-05 6.8709702e-04]]
+        [[0.00036534 0.00074454 0.00080456]
+         [0.00032014 0.00066101 0.00044157]]
     """
 
     @prim_attr_register
@@ -5763,7 +5898,15 @@ class ApplyFtrl(PrimitiveWithInfer):
           Default: -0.5. It must be a float number or a scalar tensor with float16 or float32 data type.
 
     Outputs:
-        Tensor, represents the updated `var`.
+        There are three outputs for Ascend environment.
+
+        - **var** (Tensor) - represents the updated `var`.
+        - **accum** (Tensor) - represents the updated `accum`.
+        - **linear** (Tensor) - represents the updated `linear`.
+
+        There is only one output for GPU environment.
+
+        - **var** (Tensor) - This value is always zero and the input parameters has been updated in-place.
 
     Supported Platforms:
         ``Ascend`` ``GPU``
@@ -5772,8 +5915,8 @@ class ApplyFtrl(PrimitiveWithInfer):
         >>> import mindspore
         >>> import mindspore.nn as nn
         >>> import numpy as np
-        >>> from mindspore import Parameter
-        >>> from mindspore import Tensor
+        >>> from mindspore import Parameter, Tensor
+        >>> import mindspore.context as context
         >>> from mindspore.ops import operations as ops
         >>> class ApplyFtrlNet(nn.Cell):
         ...     def __init__(self):
@@ -5796,7 +5939,9 @@ class ApplyFtrl(PrimitiveWithInfer):
         >>> net = ApplyFtrlNet()
         >>> input_x = Tensor(np.random.randint(-4, 4, (2, 2)), mindspore.float32)
         >>> output = net(input_x)
-        >>> print(output)
+        >>> is_tbe = context.get_context("device_target") == "Ascend"
+        >>> if is_tbe:
+        ...     print(output)
         (Tensor(shape=[2, 2], dtype=Float32, value=
         [[ 4.61418092e-01,  5.30964255e-01],
          [ 2.68715084e-01,  3.82065028e-01]]), Tensor(shape=[2, 2], dtype=Float32, value=
@@ -5804,6 +5949,16 @@ class ApplyFtrl(PrimitiveWithInfer):
          [ 1.43758726e+00,  9.89177322e+00]]), Tensor(shape=[2, 2], dtype=Float32, value=
         [[-1.86994812e+03, -1.64906018e+03],
          [-3.22187836e+02, -1.20163989e+03]]))
+         ... else:
+         ...    print(net.var.asnumpy())
+         [[0.4614181  0.5309642 ]
+          [0.2687151  0.38206503]]
+         ...    print(net.accum.asnumpy())
+         [[16.423655  9.645894 ]
+          [ 1.4375873 9.891773 ]]
+         ...    print(net.linear.asnumpy())
+         [[-1869.9479 -1649.0599]
+          [ -322.1879 -1201.6399]]
     """
 
     @prim_attr_register
@@ -6121,6 +6276,7 @@ class CTCLoss(PrimitiveWithInfer):
         ``Ascend`` ``GPU``
 
     Examples:
+        >>> np.random.seed(0)
         >>> inputs = Tensor(np.random.random((2, 2, 3)), mindspore.float32)
         >>> labels_indices = Tensor(np.array([[0, 0], [1, 0]]), mindspore.int64)
         >>> labels_values = Tensor(np.array([2, 2]), mindspore.int32)
@@ -6128,12 +6284,12 @@ class CTCLoss(PrimitiveWithInfer):
         >>> ctc_loss = ops.CTCLoss()
         >>> loss, gradient = ctc_loss(inputs, labels_indices, labels_values, sequence_length)
         >>> print(loss)
-        [ 0.69121575  0.5381993 ]
+        [ 0.7864997  0.720426 ]
         >>> print(gradient)
-        [[[ 0.25831494  0.3623634  -0.62067937 ]
-          [ 0.25187883  0.2921483  -0.5440271 ]]
-         [[ 0.43522435  0.24408469  0.07787037 ]
-          [ 0.29642645  0.4232373   0.06138104 ]]]
+        [[[ 0.30898064  0.36491138  -0.673892  ]
+          [ 0.33421117  0.2960548  -0.63026595 ]]
+         [[ 0.23434742  0.36907154  0.11261538 ]
+          [ 0.27316454  0.41090325  0.07584976 ]]]
     """
 
     @prim_attr_register
@@ -6172,7 +6328,7 @@ class CTCLoss(PrimitiveWithInfer):
         return inputs, inputs
 
 
-class CTCGreedyDecoder(PrimitiveWithInfer):
+class CTCGreedyDecoder(PrimitiveWithCheck):
     """
     Performs greedy decoding on the logits given in inputs.
 
@@ -6198,29 +6354,22 @@ class CTCGreedyDecoder(PrimitiveWithInfer):
           containing sequence log-probability, has the same type as `inputs`.
 
     Examples:
-        >>> class CTCGreedyDecoderNet(nn.Cell):
-        ...    def __init__(self):
-        ...        super(CTCGreedyDecoderNet, self).__init__()
-        ...        self.ctc_greedy_decoder = P.CTCGreedyDecoder()
-        ...        self.assert_op = ops.Assert(300)
-        ...
-        ...    def construct(self, inputs, sequence_length):
-        ...        out = self.ctc_greedy_decoder(inputs,sequence_length)
-        ...        self.assert_op(True, (out[0], out[1], out[2], out[3]))
-        ...        return out[2]
-        ...
         >>> inputs = Tensor(np.random.random((2, 2, 3)), mindspore.float32)
         >>> sequence_length = Tensor(np.array([2, 2]), mindspore.int32)
-        >>> net = CTCGreedyDecoderNet()
-        >>> output = net(inputs, sequence_length)
-        >>> print(output)
+        >>> ctc_greedy_decoder = ops.CTCGreedyDecoder()
+        >>> out1, out2, out3, out4 = ctc_greedy_decoder(inputs, sequence_length)
+        >>> print(out1, out2, out3, out4)
+        [[0 0] [0 1] [1 0]]
+        [0 1 0]
+        [2 2]
+        [[-0.7443749] [0.18251707]]
     """
 
     @prim_attr_register
     def __init__(self, merge_repeated=True):
         self.merge_repeated = validator.check_value_type("merge_repeated", merge_repeated, [bool], self.name)
 
-    def infer_shape(self, inputs_shape, sequence_length_shape):
+    def check_shape(self, inputs_shape, sequence_length_shape):
         validator.check_int(len(inputs_shape), 3, Rel.EQ, "inputs rank", self.name)
         validator.check_int(len(sequence_length_shape), 1, Rel.EQ, "sequence_length rank", self.name)
         validator.check('inputs batch_size', inputs_shape[1], 'sequence_length batch_size',
@@ -6232,7 +6381,7 @@ class CTCGreedyDecoder(PrimitiveWithInfer):
         log_probability_shape = [inputs_shape[1], 1]
         return decoded_indices_shape, decoded_values, decoded_shape, log_probability_shape
 
-    def infer_dtype(self, inputs_dtype, sequence_length_dtype):
+    def check_dtype(self, inputs_dtype, sequence_length_dtype):
         validator.check_tensor_dtype_valid("inputs_dtype", inputs_dtype, [mstype.float32, mstype.double], self.name)
         validator.check_tensor_dtype_valid("sequence_length_dtype", sequence_length_dtype, [mstype.int32], self.name)
         decoded_type = mstype.tensor_type(mstype.int64)
@@ -6414,7 +6563,7 @@ class DynamicRNN(PrimitiveWithInfer):
           Has the same type with input `b`.
 
     Supported Platforms:
-            ``Ascend``
+        ``Ascend``
 
     Examples:
         >>> x = Tensor(np.random.rand(2, 16, 64).astype(np.float16))
@@ -6491,7 +6640,22 @@ class DynamicRNN(PrimitiveWithInfer):
 
 class DynamicGRUV2(PrimitiveWithInfer):
     r"""
-    DynamicGRUV2 Operator.
+    Applies a single-layer gated recurrent unit (GRU) to an input sequence.
+
+    .. math::
+
+        \begin{array}{ll}
+            r_t = \sigma(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
+            z_t = \sigma(W_{iz} x_t + b_{iz} + W_{hz} h_{(t-1)} + b_{hz}) \\
+            n_t = \tanh(W_{in} x_t + b_{in} + r_t * (W_{hn} h_{(t-1)}+ b_{hn})) \\
+            h_t = (1 - z_t) * n_t + z_t * h_{(t-1)}
+        \end{array}
+
+    where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the input
+    at time `t`, :math:`h_{(t-1)}` is the hidden state of the layer
+    at time `t-1` or the initial hidden state at time `0`, and :math:`r_t`,
+    :math:`z_t`, :math:`n_t` are the reset, update, and new gates, respectively.
+    :math:`\sigma` is the sigmoid function, and :math:`*` is the Hadamard product.
 
     Args:
         direction (str): A string identifying the direction in the op. Default: 'UNIDIRECTIONAL'.
@@ -6519,9 +6683,9 @@ class DynamicGRUV2(PrimitiveWithInfer):
           Tensor of shape :math:`(\text{hidden_size}, 3 \times \text{hidden_size})`.
           The data type must be float16.
         - **bias_input** (Tensor) - Input-hidden bias. Tensor of shape :math:`(3 \times \text{hidden_size})`, or None.
-          The data type must be float16 or float32.
+          Has the same data type with input `init_h`.
         - **bias_hidden** (Tensor) - Hidden-hidden bias. Tensor of shape :math:`(3 \times \text{hidden_size})`, or None.
-          The data type must be float16 or float32.
+          Has the same data type with input `init_h`.
         - **seq_length** (Tensor) - The length of each batch. Tensor of shape :math:`(\text{batch_size})`.
           Only `None` is currently supported.
         - **init_h** (Tensor) - Hidden state of initial time.
@@ -6532,24 +6696,26 @@ class DynamicGRUV2(PrimitiveWithInfer):
         - **y** (Tensor) - A Tensor of shape :math:
           if num_proj > 0 `(num_step, batch_size, min(hidden_size, num_proj)`,
           if num_proj == 0 `(num_step, batch_size, hidden_size)`.
-          Has the same data type with input `bais_type`.
+          Has the same data type with input `bias_type`.
         - **output_h** (Tensor) - A Tensor of shape :math:`(\text{num_step}, \text{batch_size}, \text{hidden_size})`.
-          Has the same data type with input `bais_type`.
+          Has the same data type with input `bias_type`.
         - **update** (Tensor) - A Tensor of shape :math:`(\text{num_step}, \text{batch_size}, \text{hidden_size})`.
-          Has the same data type with input `bais_type`.
+          Has the same data type with input `bias_type`.
         - **reset** (Tensor) - A Tensor of shape :math:`(\text{num_step}, \text{batch_size}, \text{hidden_size})`.
-          Has the same data type with input `bais_type`.
+          Has the same data type with input `bias_type`.
         - **new** (Tensor) - A Tensor of shape :math:`(\text{num_step}, \text{batch_size}, \text{hidden_size})`.
-          Has the same data type with input `bais_type`.
+          Has the same data type with input `bias_type`.
         - **hidden_new** (Tensor) - A Tensor of shape :math:`(\text{num_step}, \text{batch_size}, \text{hidden_size})`.
-          Has the same data type with input `bais_type`.
+          Has the same data type with input `bias_type`.
 
-        - If `bias_input` and `bias_hidden` both are `None`, `bias_type` is float32.
+        A note about the bias_type:
+
+        - If `bias_input` and `bias_hidden` both are `None`, `bias_type` is date type of `init_h`.
         - If `bias_input` is not `None`, `bias_type` is the date type of `bias_input`.
         - If `bias_input` is `None` and `bias_hidden` is not `None, `bias_type` is the date type of `bias_hidden`.
 
     Supported Platforms:
-            ``Ascend``
+        ``Ascend``
 
     Examples:
         >>> x = Tensor(np.random.rand(2, 8, 64).astype(np.float16))
@@ -6630,15 +6796,16 @@ class DynamicGRUV2(PrimitiveWithInfer):
         validator.check_tensor_dtype_valid("x dtype", x_dtype, [mstype.float16], self.name)
         validator.check_tensor_dtype_valid("weight input dtype", winput_dtype, [mstype.float16], self.name)
         validator.check_tensor_dtype_valid("weight hidden dtype", whidden_dtype, [mstype.float16], self.name)
-        validator.check_tensor_dtype_valid("init_h dtype", h_dtype, (mstype.float16, mstype.float32), self.name)
-        b_dtype = mstype.float32
+        valid_dtypes = [mstype.float16, mstype.float32]
+        validator.check_tensor_dtype_valid("init_h dtype", h_dtype, valid_dtypes, self.name)
+        b_dtype = h_dtype
         if binput_dtype is not None:
-            validator.check_tensor_dtype_valid("bias input dtype", binput_dtype,
-                                               (mstype.float16, mstype.float32), self.name)
+            args = {'init_h': h_dtype, 'bias_input': binput_dtype}
+            validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
             b_dtype = binput_dtype
-        elif bhidden_dtype is not None:
-            validator.check_tensor_dtype_valid("bias hidden dtype", bhidden_dtype,
-                                               (mstype.float16, mstype.float32), self.name)
+        if bhidden_dtype is not None:
+            args = {'init_h': h_dtype, 'bias_hidden': bhidden_dtype}
+            validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
             b_dtype = bhidden_dtype
 
         return b_dtype, b_dtype, b_dtype, b_dtype, b_dtype, b_dtype
@@ -6695,6 +6862,11 @@ class InTopK(PrimitiveWithInfer):
 class LRN(PrimitiveWithInfer):
     r"""
     Local Response Normalization.
+
+    .. math::
+
+        b_{c} = a_{c}\left(k + \frac{\alpha}{n}
+        \sum_{c'=\max(0, c-n/2)}^{\min(N-1,c+n/2)}a_{c'}^2\right)^{-\beta}
 
     Args:
         depth_radius (int): Half-width of the 1-D normalization window with the shape of 0-D.
@@ -6814,6 +6986,18 @@ class Conv3D(PrimitiveWithInfer):
             pad = (pad,) * 6
         validator.check_equal_int(len(pad), 6, 'pad size', self.name)
         self.padding = pad
+        validator.check_int_range(self.padding[0], 0, kernel_size[0], Rel.INC_LEFT,
+                                  'pad_d belonging [0, kernel_size_d)', self.name)
+        validator.check_int_range(self.padding[1], 0, kernel_size[0], Rel.INC_LEFT,
+                                  'pad_d belonging [0, kernel_size_d)', self.name)
+        validator.check_int_range(self.padding[2], 0, kernel_size[1], Rel.INC_LEFT,
+                                  'pad_h belonging [0, kernel_size_h)', self.name)
+        validator.check_int_range(self.padding[3], 0, kernel_size[1], Rel.INC_LEFT,
+                                  'pad_h belonging [0, kernel_size_h)', self.name)
+        validator.check_int_range(self.padding[4], 0, kernel_size[2], Rel.INC_LEFT,
+                                  'pad_w belonging [0, kernel_size_w)', self.name)
+        validator.check_int_range(self.padding[5], 0, kernel_size[2], Rel.INC_LEFT,
+                                  'pad_w belonging [0, kernel_size_w)', self.name)
         self.pad_mode = validator.check_string(pad_mode.lower(), ['valid', 'same', 'pad'], 'pad_mode', self.name)
         self.add_prim_attr('pad_mode', self.pad_mode)
 
@@ -7107,6 +7291,18 @@ class Conv3DTranspose(PrimitiveWithInfer):
         self.pad_list = pad
         for item in self.pad_list:
             validator.check_non_negative_int(item, 'pad item', self.name)
+        validator.check_int_range(self.pad_list[0], 0, kernel_size[0], Rel.INC_LEFT,
+                                  'pad_d belonging [0, kernel_size_d)', self.name)
+        validator.check_int_range(self.pad_list[1], 0, kernel_size[0], Rel.INC_LEFT,
+                                  'pad_d belonging [0, kernel_size_d)', self.name)
+        validator.check_int_range(self.pad_list[2], 0, kernel_size[1], Rel.INC_LEFT,
+                                  'pad_h belonging [0, kernel_size_h)', self.name)
+        validator.check_int_range(self.pad_list[3], 0, kernel_size[1], Rel.INC_LEFT,
+                                  'pad_h belonging [0, kernel_size_h)', self.name)
+        validator.check_int_range(self.pad_list[4], 0, kernel_size[2], Rel.INC_LEFT,
+                                  'pad_w belonging [0, kernel_size_w)', self.name)
+        validator.check_int_range(self.pad_list[5], 0, kernel_size[2], Rel.INC_LEFT,
+                                  'pad_w belonging [0, kernel_size_w)', self.name)
         self.mode = validator.check_equal_int(mode, 1, 'mode', self.name)
         self.add_prim_attr('mode', self.mode)
         self.group = validator.check_positive_int(group, 'group', self.name)
@@ -7117,18 +7313,12 @@ class Conv3DTranspose(PrimitiveWithInfer):
 
         self.output_padding = _check_3d_int_or_tuple('output_padding', output_padding, self.name,
                                                      allow_five=True, ret_five=True, greater_zero=False)
-        if self.output_padding[2] < 0 or (self.output_padding[2] >= self.dilation[2]
-                                          and self.output_padding[2] >= self.stride[2]):
-            raise ValueError("In op, the value of [output_padding D] should be [[0, max(stride D,dilation D))], "
-                             "but it is  {}.".format(self.output_padding[2]))
-        if self.output_padding[3] < 0 or (self.output_padding[3] >= self.dilation[3]
-                                          and self.output_padding[3] >= self.stride[3]):
-            raise ValueError("In op, the value of [output_padding H] should be [[0, max(stride H,dilation H))], "
-                             "but it is  {}.".format(self.output_padding[3]))
-        if self.output_padding[4] < 0 or (self.output_padding[4] >= self.dilation[4]
-                                          and self.output_padding[4] >= self.stride[4]):
-            raise ValueError("In op, the value of [output_padding W] should be [[0, max(stride W,dilation W))], "
-                             "but it is  {}.".format(self.output_padding[4]))
+        validator.check_int_range(self.output_padding[2], 0, max(self.dilation[2], self.stride[2]), Rel.INC_LEFT,
+                                  'output_padding_d belonging [0, max(stride_d, dilation_d))', self.name)
+        validator.check_int_range(self.output_padding[3], 0, max(self.dilation[3], self.stride[3]), Rel.INC_LEFT,
+                                  'output_padding_h belonging [0, max(stride_h,dilation_h))', self.name)
+        validator.check_int_range(self.output_padding[4], 0, max(self.dilation[4], self.stride[4]), Rel.INC_LEFT,
+                                  'output_padding_w belonging [0, max(stride_w,dilation_w))', self.name)
         self.add_prim_attr('output_padding', self.output_padding)
 
     def __infer__(self, x, w, b=None):

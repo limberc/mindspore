@@ -14,12 +14,13 @@
  * limitations under the License.
  */
 
-#ifndef DATASET_API_EXECUTE_H_
-#define DATASET_API_EXECUTE_H_
+#ifndef MINDSPORE_CCSRC_MINDDATA_DATASET_INCLUDE_EXECUTE_H_
+#define MINDSPORE_CCSRC_MINDDATA_DATASET_INCLUDE_EXECUTE_H_
 
 #include <vector>
 #include <memory>
-#include "minddata/dataset/core/constants.h"
+
+#include "minddata/dataset/include/constants.h"
 #ifdef ENABLE_ANDROID
 #include "minddata/dataset/include/de_tensor.h"
 #endif
@@ -36,6 +37,9 @@ class Execute {
  public:
   /// \brief Constructor
   explicit Execute(std::shared_ptr<TensorOperation> op);
+
+  /// \brief Destructor
+  ~Execute();
 
 #ifdef ENABLE_ANDROID
   /// \brief callable function to execute the TensorOperation in eager mode
@@ -55,4 +59,4 @@ class Execute {
 
 }  // namespace dataset
 }  // namespace mindspore
-#endif  // DATASET_API_EXECUTE_H_
+#endif  // MINDSPORE_CCSRC_MINDDATA_DATASET_INCLUDE_EXECUTE_H_

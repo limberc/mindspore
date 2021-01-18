@@ -104,7 +104,7 @@ void LoadKernelData(Debugger *debugger, const CNodePtr &kernel,
                     const std::vector<mindspore::kernel::AddressPtr> &kernel_inputs,
                     const std::vector<mindspore::kernel::AddressPtr> &kernel_workspaces,
                     const std::vector<mindspore::kernel::AddressPtr> &kernel_outputs, int exec_order, void *stream_ptr,
-                    bool dump_enabled) {
+                    bool dump_enabled, bool last_kernel) {
   // check if we should read the kernel data
   bool read_data = false;
   auto &dump_json_parser = DumpJsonParser::GetInstance();
@@ -131,6 +131,10 @@ void LoadKernelData(Debugger *debugger, const CNodePtr &kernel,
       std::string input_kernel_name = input_kernel->fullname_with_scope();
       auto addr = kernel_inputs[j];
       auto type = AnfAlgo::GetOutputInferDataType(input_kernel, PARAMETER_OUTPUT_INDEX);
+      // For example, this happens with the Depend op
+      if (type == kMetaTypeNone) {
+        continue;
+      }
       auto format = kOpFormat_DEFAULT;
       auto gpu_addr = std::make_unique<GPUDeviceAddress>(addr->addr, addr->size, format, type);
       string input_tensor_name = input_kernel_name + ':' + "0";
@@ -157,6 +161,10 @@ void LoadKernelData(Debugger *debugger, const CNodePtr &kernel,
     for (int j : real_outputs) {
       auto addr = kernel_outputs[j];
       auto type = AnfAlgo::GetOutputInferDataType(kernel, j);
+      // For example, this happens with the Depend op
+      if (type == kMetaTypeNone) {
+        continue;
+      }
       auto format = kOpFormat_DEFAULT;
       auto gpu_addr = std::make_unique<GPUDeviceAddress>(addr->addr, addr->size, format, type);
       string tensor_name = kernel_name + ':' + std::to_string(j);
@@ -171,7 +179,7 @@ void LoadKernelData(Debugger *debugger, const CNodePtr &kernel,
       }
     }
   }
-  debugger->PostExecuteNode(kernel);
+  debugger->PostExecuteNode(kernel, last_kernel);
 }
 }  // namespace
 
@@ -578,6 +586,19 @@ void GPUKernelRuntime::ClearKernelWorkspaceAddress(const session::KernelGraph *g
   }
 }
 
+CNodePtr GetLastKernel(const session::KernelGraph *graph) {
+  const auto &kernels = graph->execution_order();
+  CNodePtr last_kernel;
+  for (const auto &kernel : kernels) {
+    if (AnfAlgo::IsInplaceNode(kernel, "skip")) {
+      continue;
+    } else {
+      last_kernel = kernel;
+    }
+  }
+  return last_kernel;
+}
+
 bool GPUKernelRuntime::LaunchKernelDynamic(const session::KernelGraph *graph, bool mock, bool profiling) {
   MS_EXCEPTION_IF_NULL(graph);
   MS_EXCEPTION_IF_NULL(mem_reuse_util_);
@@ -602,7 +623,7 @@ bool GPUKernelRuntime::LaunchKernelDynamic(const session::KernelGraph *graph, bo
       profiler::gpu::ProfilingUtils::GetProfilingTraceFromEnv(NOT_NULL(graph));
     profiler_inst->SetStepTraceOpName(profiling_trace);
   }
-
+  CNodePtr last_kernel = GetLastKernel(graph);
   for (const auto &kernel : kernels) {
     auto kernel_mod = AnfAlgo::GetKernelMod(kernel);
     MS_EXCEPTION_IF_NULL(kernel_mod);
@@ -658,7 +679,7 @@ bool GPUKernelRuntime::LaunchKernelDynamic(const session::KernelGraph *graph, bo
 
       // called once per kernel to collect the outputs to the kernel (does a SyncDeviceToHost)
       LoadKernelData(debugger_.get(), kernel, kernel_inputs, kernel_workspaces, kernel_outputs, exec_order, stream_,
-                     dump_enabled);
+                     dump_enabled, kernel == last_kernel);
     }
     exec_order = exec_order + 1;
     FreeKernelDynamicRes(kernel);

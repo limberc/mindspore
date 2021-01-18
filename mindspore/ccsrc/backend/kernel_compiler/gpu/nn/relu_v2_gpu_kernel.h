@@ -79,4 +79,4 @@ class ReluV2GpuKernel : public GpuKernel {
 };
 }  // namespace kernel
 }  // namespace mindspore
-#endif  // MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_GPU_NN_RELU_MASK_GPU_KERNEL_H_
+#endif  // MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_GPU_NN_RELU_V2_GPU_KERNEL_H_

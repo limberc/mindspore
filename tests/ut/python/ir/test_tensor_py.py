@@ -24,7 +24,7 @@ from ..ut_filter import non_graph_engine
 
 def _attribute(tensor, shape_, size_, dtype_):
     result = (tensor.shape == shape_) and \
-             (tensor.size() == size_) and \
+             (tensor.size == size_) and \
              (tensor.dtype == dtype_)
     return result
 
@@ -60,13 +60,31 @@ def test_tensor_mul():
 def test_tensor_dim():
     arr = np.ones((1, 6))
     b = ms.Tensor(arr)
-    assert b.dim() == 2
+    assert b.ndim == 2
 
 
 def test_tensor_size():
     arr = np.ones((1, 6))
     b = ms.Tensor(arr)
-    assert arr.size == b.size()
+    assert arr.size == b.size
+
+
+def test_tensor_itemsize():
+    arr = np.ones((1, 2, 3))
+    b = ms.Tensor(arr)
+    assert arr.itemsize == b.itemsize
+
+
+def test_tensor_strides():
+    arr = np.ones((3, 4, 5, 6))
+    b = ms.Tensor(arr)
+    assert arr.strides == b.strides
+
+
+def test_tensor_nbytes():
+    arr = np.ones((3, 4, 5, 6))
+    b = ms.Tensor(arr)
+    assert arr.nbytes == b.nbytes
 
 
 def test_dtype():

@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -118,7 +118,7 @@ class TestSummaryCollector:
             with pytest.raises(TypeError) as exc:
                 SummaryCollector(summary_dir=summary_dir, collect_freq=collect_freq)
             expected_msg = f"For `collect_freq` the type should be a valid type of ['int'], " \
-                           f'bug got {type(collect_freq).__name__}.'
+                           f'but got {type(collect_freq).__name__}.'
             assert expected_msg == str(exc.value)
 
     @pytest.mark.parametrize("action", [None, 123, '', '123'])
@@ -128,7 +128,7 @@ class TestSummaryCollector:
         with pytest.raises(TypeError) as exc:
             SummaryCollector(summary_dir=summary_dir, keep_default_action=action)
         expected_msg = f"For `keep_default_action` the type should be a valid type of ['bool'], " \
-                       f"bug got {type(action).__name__}."
+                       f"but got {type(action).__name__}."
         assert expected_msg == str(exc.value)
 
     @pytest.mark.parametrize("collect_specified_data", [123])
@@ -139,7 +139,19 @@ class TestSummaryCollector:
             SummaryCollector(summary_dir, collect_specified_data=collect_specified_data)
 
         expected_msg = f"For `collect_specified_data` the type should be a valid type of ['dict', 'NoneType'], " \
-                       f"bug got {type(collect_specified_data).__name__}."
+                       f"but got {type(collect_specified_data).__name__}."
+
+        assert expected_msg == str(exc.value)
+
+    @pytest.mark.parametrize("export_options", [123])
+    def test_params_with_export_options_type_error(self, export_options):
+        """Test type error scenario for collect specified data param."""
+        summary_dir = tempfile.mkdtemp(dir=self.base_summary_dir)
+        with pytest.raises(TypeError) as exc:
+            SummaryCollector(summary_dir, export_options=export_options)
+
+        expected_msg = f"For `export_options` the type should be a valid type of ['dict', 'NoneType'], " \
+                       f"but got {type(export_options).__name__}."
 
         assert expected_msg == str(exc.value)
 
@@ -159,7 +171,7 @@ class TestSummaryCollector:
 
         param_name = list(collect_specified_data)[0]
         expected_msg = f"For `{param_name}` the type should be a valid type of ['str'], " \
-                       f"bug got {type(param_name).__name__}."
+                       f"but got {type(param_name).__name__}."
         assert expected_msg == str(exc.value)
 
     @pytest.mark.parametrize("collect_specified_data", [
@@ -183,9 +195,17 @@ class TestSummaryCollector:
         param_value = collect_specified_data[param_name]
         expected_type = "['bool']" if param_name != 'histogram_regular' else "['str', 'NoneType']"
         expected_msg = f'For `{param_name}` the type should be a valid type of {expected_type}, ' \
-                       f'bug got {type(param_value).__name__}.'
+                       f'but got {type(param_value).__name__}.'
 
         assert expected_msg == str(exc.value)
+
+    def test_params_with_histogram_regular_value_error(self):
+        """Test histogram regular."""
+        summary_dir = tempfile.mkdtemp(dir=self.base_summary_dir)
+        with pytest.raises(ValueError) as exc:
+            SummaryCollector(summary_dir, collect_specified_data={'histogram_regular': '*'})
+
+        assert 'For `collect_specified_data`, the value of `histogram_regular`' in str(exc.value)
 
     def test_params_with_collect_specified_data_unexpected_key(self):
         """Test the collect_specified_data parameter with unexpected key."""
@@ -194,6 +214,15 @@ class TestSummaryCollector:
         with pytest.raises(ValueError) as exc:
             SummaryCollector(summary_dir, collect_specified_data=data)
         expected_msg = f"For `collect_specified_data` the keys {set(data)} are unsupported"
+        assert expected_msg in str(exc.value)
+
+    def test_params_with_export_options_unexpected_key(self):
+        """Test the export_options parameter with unexpected key."""
+        summary_dir = tempfile.mkdtemp(dir=self.base_summary_dir)
+        data = {'unexpected_key': "value"}
+        with pytest.raises(ValueError) as exc:
+            SummaryCollector(summary_dir, export_options=data)
+        expected_msg = f"For `export_options` the keys {set(data)} are unsupported"
         assert expected_msg in str(exc.value)
 
     @pytest.mark.parametrize("custom_lineage_data", [
@@ -216,18 +245,18 @@ class TestSummaryCollector:
 
         if not isinstance(custom_lineage_data, dict):
             expected_msg = f"For `custom_lineage_data` the type should be a valid type of ['dict', 'NoneType'], " \
-                           f"bug got {type(custom_lineage_data).__name__}."
+                           f"but got {type(custom_lineage_data).__name__}."
         else:
             param_name = list(custom_lineage_data)[0]
             param_value = custom_lineage_data[param_name]
             if not isinstance(param_name, str):
                 arg_name = f'custom_lineage_data -> {param_name}'
                 expected_msg = f"For `{arg_name}` the type should be a valid type of ['str'], " \
-                               f'bug got {type(param_name).__name__}.'
+                               f'but got {type(param_name).__name__}.'
             else:
                 arg_name = f'the value of custom_lineage_data -> {param_name}'
                 expected_msg = f"For `{arg_name}` the type should be a valid type of ['int', 'str', 'float'], " \
-                               f'bug got {type(param_value).__name__}.'
+                               f'but got {type(param_value).__name__}.'
 
         assert expected_msg == str(exc.value)
 
@@ -260,7 +289,7 @@ class TestSummaryCollector:
         cb_params.train_dataset_element = image_data
         with SummaryCollector((tempfile.mkdtemp(dir=self.base_summary_dir))) as summary_collector:
             summary_collector._collect_input_data(cb_params)
-            # Note Here need to asssert the result and expected data
+            # Note Here need to assert the result and expected data
 
     @mock.patch.object(SummaryRecord, 'add_value')
     def test_collect_dataset_graph_success(self, mock_add_value):
@@ -295,7 +324,6 @@ class TestSummaryCollector:
         summary_collector = SummaryCollector((tempfile.mkdtemp(dir=self.base_summary_dir)))
 
         assert summary_collector._is_parse_loss_success
-
 
     def test_get_optimizer_from_cb_params_success(self):
         """Test get optimizer success from cb params."""

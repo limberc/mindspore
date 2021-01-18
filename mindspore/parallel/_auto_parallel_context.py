@@ -16,6 +16,7 @@
 import threading
 import mindspore.context as context
 from mindspore.parallel._dp_allreduce_fusion import _set_fusion_strategy_by_idx, _set_fusion_strategy_by_size
+from mindspore.parallel._ps_context import _is_role_pserver
 from mindspore._c_expression import AutoParallelContext
 from mindspore._checkparam import args_type_check
 
@@ -180,6 +181,8 @@ class _AutoParallelContext:
     def get_parallel_mode(self):
         """Get parallel mode."""
         self.check_context_handle()
+        if _is_role_pserver():
+            return context.ParallelMode.STAND_ALONE
         return self._context_handle.get_parallel_mode()
 
     def set_strategy_search_mode(self, auto_parallel_search_mode):
@@ -242,7 +245,24 @@ class _AutoParallelContext:
     def get_full_batch(self):
         """Get whether load full batch on each device."""
         self.check_context_handle()
+        if _is_role_pserver():
+            return False
         return self._context_handle.get_full_batch()
+
+    def set_grad_accumulation_step(self, grad_accumulation_step):
+        """
+        Set grad accumulation step.
+
+        Args:
+            grad_accumulation_step (int): The grad accumulation step.
+        """
+        self.check_context_handle()
+        self._context_handle.set_grad_accumulation_step(grad_accumulation_step)
+
+    def get_grad_accumulation_step(self):
+        """Get grad accumulation step."""
+        self.check_context_handle()
+        return self._context_handle.get_grad_accumulation_step()
 
     def set_strategy_ckpt_save_file(self, strategy_ckpt_save_file):
         """
@@ -487,6 +507,7 @@ _set_auto_parallel_context_func_map = {
     "strategy_ckpt_save_file": auto_parallel_context().set_strategy_ckpt_save_file,
     "full_batch": auto_parallel_context().set_full_batch,
     "enable_parallel_optimizer": auto_parallel_context().set_enable_parallel_optimizer,
+    "grad_accumulation_step": auto_parallel_context().set_grad_accumulation_step,
     "all_reduce_fusion_config": auto_parallel_context().set_all_reduce_fusion_split_indices}
 
 
@@ -504,6 +525,7 @@ _get_auto_parallel_context_func_map = {
     "strategy_ckpt_save_file": auto_parallel_context().get_strategy_ckpt_save_file,
     "full_batch": auto_parallel_context().get_full_batch,
     "enable_parallel_optimizer": auto_parallel_context().get_enable_parallel_optimizer,
+    "grad_accumulation_step": auto_parallel_context().get_grad_accumulation_step,
     "all_reduce_fusion_config": auto_parallel_context().get_all_reduce_fusion_split_indices}
 
 
@@ -511,7 +533,7 @@ _get_auto_parallel_context_func_map = {
                  loss_repeated_mean=bool, parallel_mode=str, auto_parallel_search_mode=str,
                  parameter_broadcast=bool, strategy_ckpt_load_file=str,
                  strategy_ckpt_save_file=str, full_batch=bool, enable_parallel_optimizer=bool,
-                 all_reduce_fusion_config=list)
+                 grad_accumulation_step=int, all_reduce_fusion_config=list)
 
 def _set_auto_parallel_context(**kwargs):
     """

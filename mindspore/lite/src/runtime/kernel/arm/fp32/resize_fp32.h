@@ -17,6 +17,9 @@
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_FP32_RESIZE_H_
 
 #include <vector>
+#include <algorithm>
+#include "include/errorcode.h"
+#include "nnacl/fp32/resize_fp32.h"
 #include "src/lite_kernel.h"
 #include "src/runtime/kernel/arm/base/resize_base.h"
 
@@ -48,6 +51,7 @@ class ResizeCPUKernel : public ResizeBaseCPUKernel {
   float *y_bottom_weights_ = nullptr;
   float *x_left_weights_ = nullptr;
   float *line_buffer_ = nullptr;
+  CalculateOriginalCoordinate calculate_ = nullptr;
 };
 }  // namespace mindspore::kernel
 

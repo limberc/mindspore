@@ -59,23 +59,48 @@ int TensorListSetItemCPUKernel::Run() {
   MS_ASSERT(output0_ != nullptr);
   // copy each tensor in tensors_
   for (int i = 0; i < output0_->ElementsNum(); ++i) {
-    auto dst = output0_->GetTensorIndex(i);
-    MS_ASSERT(dst != nullptr);
-    auto src = input0_->GetTensorIndex(i);
     if (i == index_) {
-      // copy input2_ data buff
-      src = input2_;
-    }
-    MS_ASSERT(src != nullptr);
-    if (src->data_type() != kTypeUnknown) {
-      if (src->Size() != dst->Size()) {
-        MS_LOG(ERROR) << "src->Size():" << src->Size() << " must be equal to dst->Size():" << dst->Size();
-        return RET_ERROR;
+      auto dst = output0_->GetTensor(i);
+      if (dst == nullptr) {
+        dst = lite::Tensor::CopyTensor(*input2_, true);
+        auto &tensors = output0_->tensors();
+        tensors.emplace_back(dst);
+      } else {
+        dst->set_data_type(input2_->data_type());
+        dst->set_shape(input2_->shape());
+        dst->set_format(input2_->format());
+        dst->set_category(input2_->category());
+        dst->set_root_tensor(input2_->root_tensor());
+        dst->set_tensor_name(input2_->tensor_name());
+        dst->set_quant_clusters(input2_->quant_clusters());
+        auto ret = lite::Tensor::CopyTensorData(*input2_, dst);
+        if (ret != RET_OK) {
+          MS_LOG(ERROR) << "CopyTensorData[" << i << "] is failed!";
+          return RET_ERROR;
+        }
       }
-      auto ret = dst->CopyTensorData(*src);
-      if (ret != RET_OK) {
-        MS_LOG(ERROR) << "CopyTensorData[" << i << "] is failed!";
-        return RET_ERROR;
+    } else {
+      auto src = input0_->GetTensor(i);
+      auto dst = output0_->GetTensor(i);
+      MS_ASSERT(src != nullptr);
+      // merge move data will delete tensors
+      if (dst == nullptr) {
+        dst = lite::Tensor::CopyTensor(*src, src->data_c() != nullptr);
+        auto &tensors = output0_->tensors();
+        tensors.emplace_back(dst);
+        continue;
+      }
+
+      if (src->data_type() != kTypeUnknown) {
+        if (src->Size() != dst->Size()) {
+          MS_LOG(ERROR) << "src->Size():" << src->Size() << " must be equal to dst->Size():" << dst->Size();
+          return RET_ERROR;
+        }
+        auto ret = lite::Tensor::CopyTensorData(*src, dst);
+        if (ret != RET_OK) {
+          MS_LOG(ERROR) << "CopyTensorData[" << i << "] is failed!";
+          return RET_ERROR;
+        }
       }
     }
   }
@@ -84,36 +109,6 @@ int TensorListSetItemCPUKernel::Run() {
 
 int TensorListSetItemCPUKernel::ReSize() { return RET_OK; }
 
-kernel::LiteKernel *CpuTensorListSetItemFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                          const std::vector<lite::Tensor *> &outputs,
-                                                          OpParameter *op_parameter, const lite::InnerContext *ctx,
-                                                          const kernel::KernelKey &desc,
-                                                          const mindspore::lite::PrimitiveC *primitive) {
-  if (op_parameter == nullptr) {
-    MS_LOG(ERROR) << "Input op_parameter is nullptr!";
-    return nullptr;
-  }
-  if (ctx == nullptr) {
-    MS_LOG(ERROR) << "Input context is nullptr!";
-    free(op_parameter);
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_TensorListSetItem);
-  auto *kernel = new (std::nothrow) TensorListSetItemCPUKernel(op_parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new TensorListSetItemCPUKernel fail!";
-    free(op_parameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed! name: " << op_parameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(op_parameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_TensorListSetItem, CpuTensorListSetItemFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_TensorListSetItem, LiteKernelCreator<TensorListSetItemCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_TensorListSetItem, LiteKernelCreator<TensorListSetItemCPUKernel>)
 }  // namespace mindspore::kernel

@@ -34,7 +34,7 @@ class MatMulBase : public OperatorInfo {
  public:
   MatMulBase(const std::string &name, const Shapes &inputs_shape, const Shapes &outputs_shape,
              const PrimitiveAttrs &attrs)
-      : OperatorInfo(name, inputs_shape, outputs_shape, attrs, std::make_shared<MatMulCost>(true)) {}
+      : OperatorInfo(name, inputs_shape, outputs_shape, attrs, std::make_shared<MatMulCost>()) {}
   ~MatMulBase() override = default;
 
   Status Init(const StrategyPtr &strategy) override;
@@ -49,7 +49,6 @@ class MatMulBase : public OperatorInfo {
   Status SwapLastTwoElements(Shape *shape);
 
  protected:
-  Status InferMirrorOps() override;
   Status InferForwardCommunication() override;
   Status InferTensorInfo() override;
   Status InferDevMatrixShape() override;

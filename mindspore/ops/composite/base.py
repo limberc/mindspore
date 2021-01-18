@@ -75,6 +75,15 @@ def core(fn=None, **flags):
         fn (Function): Function to add flag. Default: None.
         flags (dict): The following flags can be set core, which indicates that this is a core function or
                       other flag. Default: None.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
+    Examples:
+        >>> net = Net()
+        >>> net = core(net, predit=True)
+        >>> print(hasattr(net, '_mindspore_flags'))
+        True
     """
     # need set the attr and access on c++
 
@@ -182,6 +191,9 @@ class GradOperation(GradOperation_):
         sens_param (bool): Whether to append sensitivity (gradient with respect to output) as input.
             If sens_param is False, a 'ones_like(outputs)' sensitivity will be attached automatically.
             Default: False.
+            If the sensor_param is True, a sensitivity (gradient with respect to output) needs to be transferred through
+            the location parameter or key-value pair parameter. If the value is transferred through the key-value pair
+            parameter, the key must be sens.
 
     Returns:
         The higher-order function which takes a function as argument and returns gradient function for it.
@@ -307,29 +319,30 @@ class GradOperation(GradOperation_):
         GradOperation_.__init__(self, 'grad', get_all, get_by_list, sens_param)
         self.grad_fn = None
         self.fn = None
-        self.need_forward = False
 
     def _pynative_forward_run(self, args, kwargs, fn):
         """ Pynative forward run to build grad graph. """
+        new_kwargs = kwargs
         if self.sens_param:
-            args = args[:-1]
+            if not 'sens' in kwargs.keys():
+                args = args[:-1]
+            else:
+                new_kwargs = kwargs.copy()
+                new_kwargs.pop('sens')
         for arg in args:
             if not isinstance(arg, Tensor):
                 raise TypeError("grad inputs should be tensor in pynative mode")
         if isinstance(fn, FunctionType):
-            _pynative_exec.set_grad_flag(True)
-            _pynative_exec.new_graph(fn, *args, **kwargs)
-            output = fn(*args, **kwargs)
-            _pynative_exec.end_graph(fn, output, *args, **kwargs)
+            if not _pynative_exec.check_run(fn, *args, **new_kwargs):
+                _pynative_exec.set_grad_flag(True)
+                _pynative_exec.new_graph(fn, *args, **new_kwargs)
+                output = fn(*args, **new_kwargs)
+                _pynative_exec.end_graph(fn, output, *args, **new_kwargs)
         else:
-            if fn.already_run and not fn.requires_grad:
-                raise ValueError("obj must set_grad.")
-            if not fn.already_run:
-                self.need_forward = True
-            if self.need_forward:
+            # Check if fn have run already
+            if not _pynative_exec.check_run(fn, *args, **new_kwargs):
                 fn.set_grad()
-                fn(*args, **kwargs)
-                fn.already_run = False
+                fn(*args, **new_kwargs)
 
     def __call__(self, fn, weights=None):
         grad_ = GradOperation(self.get_all, self.get_by_list, self.sens_param)
@@ -348,7 +361,6 @@ class GradOperation(GradOperation_):
                 def after_grad(*args, **kwargs):
                     if _pynative_exec.check_graph(fn, *args, **kwargs):
                         print("Another grad step is running")
-                        fn.already_run = False
                     self._pynative_forward_run(args, kwargs, fn)
                     _pynative_exec.grad(grad_, fn, weights, *args, **kwargs)
                     out = _pynative_exec(fn, *args, **kwargs)

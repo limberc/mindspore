@@ -17,7 +17,7 @@
 #define MINDSPORE_LITE_NNACL_LAYER_NORM_PARAMETER_H_
 
 #include "nnacl/op_base.h"
-#include "nnacl/quantization/quantize.h"
+#include "mindspore/lite/nnacl/int8/quantize.h"
 
 enum ElementwiseMode { ELEMENTWISE_NOT = 0, ELEMENTWISE_PER_CHANNEL = 1, ELEMENTWISE_PER_NUM = 2 };
 typedef struct LayerNormParameter {
@@ -26,7 +26,7 @@ typedef struct LayerNormParameter {
   float epsilon_;
   enum ElementwiseMode elementwise_mode_;
   // shape correlative
-  int *normalized_shape_;
+  int normalized_shape_[8];
   int normalized_dims_;
   // other parameter
   int thread_count_;

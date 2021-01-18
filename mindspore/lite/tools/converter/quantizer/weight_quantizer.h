@@ -17,9 +17,13 @@
 #ifndef MINDSPORE_LITE_TOOLS_CONVERTER_QUANTIZER_WEIGHT_QUANTIZER_H
 #define MINDSPORE_LITE_TOOLS_CONVERTER_QUANTIZER_WEIGHT_QUANTIZER_H
 
+#include <future>
 #include <memory>
+#include <unordered_map>
+#include <map>
 #include <list>
 #include <string>
+#include <vector>
 #include "tools/converter/quantizer/quantizer.h"
 #include "tools/converter/quantizer/quantize_util.h"
 #include "ir/func_graph.h"
@@ -27,27 +31,41 @@
 #include "include/model.h"
 #include "base/base.h"
 #include "abstract/dshape.h"
+#include "src/lite_session.h"
 
 namespace mindspore::lite::quant {
 class WeightQuantizer : public Quantizer {
  public:
-  WeightQuantizer(FuncGraphPtr graph, const std::string &weightSize, const std::string &covWeightChannelThreshold,
-                  const std::string &bitNum);
+  WeightQuantizer(FuncGraphPtr graph, const std::string &config_file, const std::string &weightSize,
+                  const std::string &covWeightChannelThreshold, const std::string &bitNum);
+  WeightQuantizer(FuncGraphPtr graph, const PostQuantConfig &config);
+  ~WeightQuantizer();
 
-  ~WeightQuantizer() = default;
-
-  STATUS DoQuantize(FuncGraphPtr funcGraph) override;
-  STATUS DoConvQuantize(const std::list<CNodePtr> &nodes);
-  STATUS DoMulQuantize(const std::list<CNodePtr> &nodes);
+  STATUS DoQuantize(FuncGraphPtr func_graph) override;
+  STATUS DoConvQuantize(CNodePtr);
+  STATUS DoMulQuantize(CNodePtr);
+  STATUS DoLstmQuntize(CNodePtr cnode);
+  STATUS DoGatherQuntize(CNodePtr cnode);
   static STATUS WeightQuantInputCheck(const converter::Flags *config);
   static bool IsPosNum(const std::string &str);
-  int quant_max;
-  int quant_min;
-  TypeId type_id{kTypeUnknown};
+
+  int quant_max_{127};
+  int quant_min_{-128};
+  TypeId type_id_{kNumberTypeInt8};
+  std::map<std::string, int> opname_bit_;
 
  private:
-  std::unique_ptr<QuantStrategy> mStrategy;
-  size_t bitNum;
+  std::unique_ptr<QuantStrategy> quant_strategy_;
+  size_t bit_num_{8};
+  std::string config_file_;
+  PostQuantConfig config_param_;
+  std::vector<std::vector<std::string>> images_;  // multi_input, [[mode_input_0], [model_input_1]...]
+  std::vector<std::unordered_map<std::string, mindspore::tensor::MSTensor *>> fp32_output_tensors_;
+
+  STATUS DoMiexedQuant(FuncGraphPtr);
+  STATUS SetAbstract(ParamValueLitePtr param_value, ParameterPtr param_node, std::shared_ptr<PrimitiveC> primitive_c);
+  STATUS DoFixedQuant(FuncGraphPtr);
+  STATUS RunFp32Graph(FuncGraphPtr);
 };
 }  // namespace mindspore::lite::quant
 #endif

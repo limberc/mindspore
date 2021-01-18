@@ -714,6 +714,21 @@ class FusedBatchNormGradEx(PrimitiveWithInfer):
         return (x_type, scale_type, scale_type)
 
 
+class InstanceNormGrad(PrimitiveWithInfer):
+    """Gradients of InstanceNorm operation."""
+
+    @prim_attr_register
+    def __init__(self, is_training=True, epsilon=0.0, momentum=0.1):
+        self.init_prim_io_names(inputs=['dy', 'x', 'gamma', 'save_mean', 'save_variance'],
+                                outputs=['dx', 'bn_gamma', 'bn_beta'])
+
+    def infer_shape(self, y_backprop_shape, x_shape, gamma_shape, save_mean_shape, save_variance_shape):
+        return (x_shape, gamma_shape, gamma_shape)
+
+    def infer_dtype(self, y_backprop_type, x_type, gamma_type, save_mean_type, save_variance_type):
+        return (x_type, gamma_type, gamma_type)
+
+
 class UniqueGrad(Primitive):
     """Gradients of Unique operation."""
 
@@ -1344,7 +1359,6 @@ class DynamicGRUV2Grad(PrimitiveWithInfer):
         cell_clip (float): A float identifying the cell clip in the op. Default: -1.0.
         num_proj (int): An integer identifying the num proj in the op. Default: 0.
         time_major (bool): A bool identifying the time major in the op. Default: True.
-        bias_type (str): An string identifying the type of bias_type function in the op. Default to "double_bias".
         gate_order (str): An string identifying the gate order in weight and bias. Default: 'rzh.
             'zrh' is another option.
         reset_after (bool): An bool identifying whether to apply reset gate after matrix multiplication. Default: True.
@@ -1402,7 +1416,6 @@ class DynamicGRUV2Grad(PrimitiveWithInfer):
                  cell_clip=-1.0,
                  num_proj=0,
                  time_major=True,
-                 bias_type="double_bias",
                  gate_order="rzh",
                  reset_after=True):
         self.cell_depth = validator.check_value_type("cell_depth", cell_depth, [int], self.name)
@@ -1411,8 +1424,6 @@ class DynamicGRUV2Grad(PrimitiveWithInfer):
         self.num_proj = validator.check_non_negative_int(num_proj, "num_proj", self.name)
         self.time_major = validator.check_value_type("time_major", time_major, [bool], self.name)
         self.direction = validator.check_string(direction, ['UNIDIRECTIONAL'], "direction", self.name)
-        self.bias_type = validator.check_string(bias_type,
-                                                ['no_bias', 'single_bias', 'double_bias'], "bias_type", self.name)
         self.gate_order = validator.check_string(gate_order, ['zrh', 'rzh'], "gate_order", self.name)
         self.reset_after = validator.check_value_type("reset_after", reset_after, [bool], self.name)
         self.add_prim_attr("io_format", "ND")
@@ -1748,6 +1759,38 @@ class SliceGrad(PrimitiveWithInfer):
         return {'shape': x_shape,
                 'dtype': x['dtype'],
                 'value': None}
+
+
+class NLLLossGrad(PrimitiveWithInfer):
+    """Computes the gradients of `NLLLoss`."""
+
+    @prim_attr_register
+    def __init__(self, reduction="mean"):
+        """Initialize NLLLoss"""
+        self.init_prim_io_names(inputs=['x', 'target', "weight"], outputs=['loss'])
+        self.reduction = validator.check_string(reduction, ['none', 'sum', 'mean'], 'reduction', self.name)
+        self.add_prim_attr('reduction', self.reduction)
+
+    def infer_shape(self, x_shape, y_grad_shape, t_shape, w_shape, tw_shape):
+        validator.check_int(len(x_shape), [1, 2], Rel.IN, "x rank", self.name)
+        validator.check_int(len(t_shape), 1, Rel.EQ, "target rank", self.name)
+        validator.check_int(len(w_shape), 1, Rel.EQ, "weight rank", self.name)
+        validator.check(f"input_shape[0]", x_shape[0], "target_shape", t_shape[0], Rel.EQ, self.name)
+        if len(x_shape) == 1:
+            validator.check(f"input_shape[0]", x_shape[0], "weight_shape", w_shape[0], Rel.EQ, self.name)
+        else:
+            validator.check(f"input_shape[1]", x_shape[1], "weight_shape", w_shape[0], Rel.EQ, self.name)
+        return x_shape
+
+    def infer_dtype(self, x_dtype, y_grad_dtype, t_dtype, w_dtype, tw_dtype):
+        valid_dtypes = (mstype.float16, mstype.float32)
+        validator.check_tensor_dtype_valid("x_dtype", x_dtype, valid_dtypes, self.name)
+        validator.check_tensor_dtype_valid("y_grad_dtype", y_grad_dtype, valid_dtypes, self.name)
+        validator.check_tensor_dtype_valid("t_dtype", t_dtype, mstype.int32, self.name)
+        validator.check_tensor_dtype_valid("w_dtype", w_dtype, valid_dtypes, self.name)
+        validator.check_tensor_dtype_valid("tw_dtype", tw_dtype, valid_dtypes, self.name)
+        validator.check('tw_shape_dtype', tw_dtype, 'w_shape_dtype', w_dtype, Rel.EQ, self.name)
+        return x_dtype
 
 
 class SmoothL1LossGrad(PrimitiveWithInfer):

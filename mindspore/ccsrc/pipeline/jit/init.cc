@@ -106,7 +106,7 @@ PYBIND11_MODULE(_c_expression, m) {
               py::arg("batch_size"), py::arg("types"), py::arg("shapes"), py::arg("input_indexs"),
               py::arg("phase") = py::str("dataset"), py::arg("need_run") = py::bool_(true), "Init and exec dataset.");
   (void)m.def("_set_dataset_mode_config", &mindspore::ConfigManager::SetDatasetModeConfig, "API for set dataset mode.");
-  (void)m.def("init_backend", &mindspore::pipeline::InitBackend, "Init Backend.");
+  (void)m.def("init_pipeline", &mindspore::pipeline::InitPipeline, "Init Pipeline.");
 
   (void)m.def("export_graph", &mindspore::pipeline::ExportGraph, "Export Graph.");
 
@@ -131,6 +131,8 @@ PYBIND11_MODULE(_c_expression, m) {
     .def("set_loss_repeated_mean", &ParallelContext::set_loss_repeated_mean, "Set loss repeated mean.")
     .def("get_parallel_mode", &ParallelContext::parallel_mode, "Get parallel mode.")
     .def("set_parallel_mode", &ParallelContext::set_parallel_mode, "Set parallel mode.")
+    .def("get_grad_accumulation_step", &ParallelContext::grad_accumulation_step, "Get grad accumulation step.")
+    .def("set_grad_accumulation_step", &ParallelContext::set_grad_accumulation_step, "Set grad accumulation step.")
     .def("get_strategy_search_mode", &ParallelContext::strategy_search_mode, "Get strategy search mode.")
     .def("set_strategy_search_mode", &ParallelContext::set_strategy_search_mode, "Set strategy search mode.")
     .def("set_all_reduce_fusion_split_indices", &ParallelContext::SetAllReduceFusionSplitIndices,

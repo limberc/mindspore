@@ -214,11 +214,8 @@ class _Context:
         self.set_param(ms_ctx_param.max_call_depth, max_call_depth)
 
     def set_profiling_options(self, option):
-        options = ["training_trace", "task_trace",
-                   "task_trace:training_trace", "training_trace:task_trace", "op_trace"]
-        if option not in options:
-            raise ValueError("Profiling options must be in 'training_trace' 'task_trace' "
-                             "'task_trace:training_trace' 'training_trace:task_trace' or 'op_trace'.")
+        if not isinstance(option, str):
+            raise TypeError("The parameter option must be str.")
         self.set_param(ms_ctx_param.profiling_options, option)
 
     def set_variable_memory_max_size(self, variable_memory_max_size):
@@ -259,7 +256,6 @@ class _Context:
 
     setters = {
         'mode': set_mode,
-        'backend_policy': set_backend_policy,
         'save_graphs_path': set_save_graphs_path,
         'device_target': set_device_target,
         'device_id': set_device_id,
@@ -377,15 +373,20 @@ def set_auto_parallel_context(**kwargs):
                      - recursive_programming: Recursive programming search mode.
 
                      - dynamic_programming: Dynamic programming search mode.
-        parameter_broadcast (bool): Whether to broadcast parameters before training. Default: False.
+        parameter_broadcast (bool): Whether to broadcast parameters before training. Before training, in order to have
+                     the same network initialization parameter values for all devices, broadcast the parameters
+                     on device 0 to other devices. Parameter broadcasting in different parallel modes is different,
+                     data_parallel mode, all parameters are broadcast except for the prameter whose attribute
+                     layerwise_parallel is True. Hybrid_parallel, semi_auto_parallel and auto_parallel mode, the
+                     segmented parameters do not participate in broadcasting. Default: False.
         strategy_ckpt_load_file (str): The path to load parallel strategy checkpoint. Default: ''
         strategy_ckpt_save_file (str): The path to save parallel strategy checkpoint. Default: ''
         full_batch (bool): If you load whole batch datasets in auto_parallel mode, this parameter
                        should be set with True. Default: False.
         enable_parallel_optimizer (bool): This is a developing feature, which shards the weight update computation for
-                       data parallel training in the benefit of time and memory saving. For now, auto parallel mode
-                       supports all optimizers. Data parallel mode only supports `Lamb` and `AdamWeightDecay`.
-                       Default: False.
+                       data parallel training in the benefit of time and memory saving. Currently, auto and semi auto
+                       parallel mode support all optimizers in both Ascend and GPU. Data parallel mode only supports
+                       `Lamb` and `AdamWeightDecay` in Ascend . Default: False.
         all_reduce_fusion_config (list): Set allreduce fusion strategy by parameters indices. Only support ReduceOp.SUM
                        and HCCL_WORLD_GROUP/NCCL_WORLD_GROUP. No Default, if it is not set, the fusion is closed.
         pipeline_stages (int): Set the stage information for pipeline parallel. This indicates how
@@ -450,7 +451,7 @@ def reset_auto_parallel_context():
 
 
 def _check_target_specific_cfgs(device, arg_key):
-    """Checking whether a config is sutable for a specified device"""
+    """Checking whether a config is suitable for a specified device"""
     device_cfgs = {
         'enable_auto_mixed_precision': ['Ascend'],
         'enable_dump': ['Ascend'],
@@ -504,7 +505,7 @@ def set_context(**kwargs):
     ===========================  ===========================  =================
     Common(CPU/GPU/Ascend)       Ascend                       GPU
     ===========================  ===========================  =================
-    check_bprop                  enable_auto_mixed_precision  max_device_memory
+    check_bprop                  print_file_path              max_device_memory
     device_id                    enable_dump                  enable_graph_kernel
     device_target                save_dump_path
     enable_sparse                enable_graph_kernel
@@ -512,7 +513,7 @@ def set_context(**kwargs):
     mode                         enable_profiling
     reserve_class_name_in_scope  profiling_options
     save_graphs                  variable_memory_max_size
-    save_graphs_path             print_file_path
+    save_graphs_path
     ===========================  ===========================  =================
 
     Args:
@@ -522,7 +523,6 @@ def set_context(**kwargs):
                     while device_num_per_host should be no more than 4096. Default: 0.
         save_graphs (bool): Whether to save graphs. Default: False.
         save_graphs_path (str): Path to save graphs. Default: "."
-        enable_auto_mixed_precision (bool): Whether to enable auto mixed precision. Default: False.
         enable_graph_kernel (bool): Whether to enable composition of basic primitives. These primitives would be
             compiled into a fused kernel automatically. Default: False.
         reserve_class_name_in_scope (bool) : Whether to save the network class name in the scope. Default: True.
@@ -544,7 +544,7 @@ def set_context(**kwargs):
             - op_trace: collect single operator performance data.
 
             The profiling can choose the combination of `training_trace`, `task_trace`,
-            `training_trace` and `task_trace` combination, and eparated by colons;
+            `training_trace` and `task_trace` combination, and separated by colons;
             a single operator can choose `op_trace`, `op_trace` cannot be combined with
             `training_trace` and `task_trace`. Default: "training_trace".
         check_bprop (bool): Whether to check bprop. Default: False.

@@ -18,13 +18,9 @@
 #include <string>
 #include <utility>
 #include <limits>
-#if defined(NUMA_ENABLED) && defined(ENABLE_GPUQUE)
-#include <numa.h>
-#endif
 #include "minddata/dataset/engine/datasetops/dataset_op.h"
 #include "minddata/dataset/engine/datasetops/shuffle_op.h"
 #include "minddata/dataset/engine/datasetops/device_queue_op.h"
-#include "minddata/dataset/util/task_manager.h"
 #include "minddata/dataset/engine/opt/pass.h"
 #include "minddata/dataset/engine/opt/pre/removal_pass.h"
 #ifndef ENABLE_ANDROID
@@ -36,29 +32,39 @@
 #include "minddata/dataset/engine/opt/pre/epoch_injection_pass.h"
 #include "minddata/dataset/engine/perf/profiling.h"
 #include "minddata/dataset/engine/perf/monitor.h"
+#if defined(ENABLE_GPUQUE) || defined(ENABLE_TDTQUE)
+#include "minddata/dataset/util/numa_interface.h"
+#endif
+#include "minddata/dataset/util/task_manager.h"
 
 namespace mindspore {
 namespace dataset {
 // Constructor
-ExecutionTree::ExecutionTree() : id_count_(0), pre_pass_override_(nullptr) {
+ExecutionTree::ExecutionTree() : id_count_(0), tree_state_(kDeTStateInit), prepare_flags_(kDePrepNone) {
   tg_ = std::make_unique<TaskGroup>();
-  tree_state_ = kDeTStateInit;
-  prepare_flags_ = kDePrepNone;
   profiling_manager_ = std::make_unique<ProfilingManager>(this);
-  optimize_ = common::GetEnv("OPTIMIZE") == "true" ? true : false;
-#if defined(NUMA_ENABLED) && defined(ENABLE_GPUQUE)
+#if defined(ENABLE_GPUQUE) || defined(ENABLE_TDTQUE)
   std::shared_ptr<ConfigManager> cfg = GlobalContext::config_manager();
   rank_id_ = cfg->rank_id();
+  numa_enable_ = cfg->numa_enable();
+  handle_ = nullptr;
 #endif
 }
 
 // Destructor
 ExecutionTree::~ExecutionTree() {
-#ifdef ENABLE_TDTQUE
+#if defined(ENABLE_GPUQUE) || defined(ENABLE_TDTQUE)
+  if (numa_enable_) {
+    if (handle_ != nullptr) {
+      ReleaseLibrary(handle_);
+    }
+  }
+#if defined(ENABLE_TDTQUE)
   DeviceQueueOp *op = dynamic_cast<DeviceQueueOp *>(root_.get());
   if (op != nullptr) {
     op->StopWaiting();
   }
+#endif
 #endif
   (void)tg_->ServiceStop();
 }
@@ -143,27 +149,26 @@ void ExecutionTree::PrintNode(std::ostream &out, const std::shared_ptr<DatasetOp
 // Start the execution of the tree
 Status ExecutionTree::Launch() {
   // opencv limit too many threads
-#ifndef ENABLE_ANDROID
-#if !defined(_WIN32) && !defined(_WIN64) && !defined(__APPLE__)
-#if defined(NUMA_ENABLED) && defined(ENABLE_GPUQUE)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__APPLE__) && !defined(ENABLE_ANDROID)
+#if defined(ENABLE_GPUQUE) || defined(ENABLE_TDTQUE)
   // Here we do numa bind for performance optimization, as our test result,
   // if we do numa bind when get_dataset_size launch a tree, we'll get a
   // better performance than only we do numa bind at the time _To_Device
   // launch a tree. Our numa bind work is a process level bind, bind with
   // both cpu and memory and we choose numa_node with a polling logic:
   // numa_bind_id = rank_id_ % (numa_max_node() + 1)
-  // Now we only test pass in GPU scenario, we've not tested D scenario,
-  // without enough test we don't suggest numa feature open in D scenario
-  int numa_node_max_id = numa_max_node();
-  if (numa_node_max_id >= 0 && rank_id_ >= 0) {
-    uint32_t numa_bind_id = static_cast<uint32_t>(rank_id_ % (numa_node_max_id + 1));
-    auto bm = numa_allocate_nodemask();
-    numa_bitmask_clearall(bm);
-    numa_bitmask_setbit(bm, numa_bind_id);
-    numa_bind(bm);
-    numa_bitmask_free(bm);
-  } else {
-    RETURN_STATUS_UNEXPECTED("Get numa max node failed.");
+  // Now we only support GPU scenario and the single process scenario of Ascend,
+  // now we remove the target_link of numa with _c_dataengine, and user can use
+  // a config api to control whether to open numa feature.
+  if (numa_enable_ && rank_id_ >= 0) {
+    if (handle_ == nullptr) {
+      handle_ = GetNumaAdapterHandle();
+      if (handle_ == nullptr) {
+        RETURN_STATUS_UNEXPECTED("Numa package not found.");
+      }
+    }
+    RETURN_IF_NOT_OK(NumaBind(handle_, rank_id_));
+    MS_LOG(INFO) << "Numa bind memory and cpu successful.";
   }
 #endif
   int32_t thread_num = get_nprocs();
@@ -176,7 +181,7 @@ Status ExecutionTree::Launch() {
   else
     cv::setNumThreads(thread_num);
 #endif
-#endif
+
   // Tree must be built and prepared before it can be launched!
   if (tree_state_ != kDeTStateReady) {
     std::string err_msg =
@@ -272,10 +277,6 @@ Status ExecutionTree::Prepare(int32_t num_epochs, bool partial) {
   // Pre optimization compulsory transformation
   RETURN_IF_NOT_OK(this->PreAction());
 
-  // If optional optimizations are enabled
-  if (optimize_) {
-    RETURN_IF_NOT_OK(this->Optimize());
-  }
   // Post optimization compulsory transformation
   RETURN_IF_NOT_OK(this->PostAction());
 
@@ -297,14 +298,6 @@ Status ExecutionTree::PreAction() {
 #endif
     pre_actions.push_back(std::make_unique<EpochInjectionPass>());
     pre_actions.push_back(std::make_unique<RemovalPass>());
-  }
-
-  // this offers a way to override the preset optimization pass with customized ones
-  // this is used when certain nodes are removed for tree getters
-  if (pre_pass_override_) {
-    MS_LOG(INFO) << "Default pre optimization passes is being overridden,"
-                 << " number of passes before the override:" << pre_actions.size() << ".";
-    pre_actions = pre_pass_override_(std::move(pre_actions));
   }
 
   MS_LOG(INFO) << "Running " << pre_actions.size() << " pre pass loops.";
@@ -337,22 +330,6 @@ Status ExecutionTree::PostAction() {
   }
   MS_LOG(INFO) << "Post passes complete.";
 
-  return Status::OK();
-}
-
-Status ExecutionTree::Optimize() {
-  // Vector of optimizations, currently only 1, add more as necessary
-  OptPass optimizations;
-#ifndef ENABLE_ANDROID
-  optimizations.push_back(std::make_unique<TensorOpFusionPass>());
-#endif
-  // vector of flags for each optimization
-  std::vector<bool> modified(optimizations.size(), false);
-  for (auto i = 0; i < optimizations.size(); i++) {
-    auto m = false;
-    optimizations[i]->Run(this, &m);
-    modified[i] = m;
-  }
   return Status::OK();
 }
 

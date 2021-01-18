@@ -28,6 +28,7 @@ from mindspore.ops.operations import _grad_ops as G
 from mindspore.ops.operations import _inner_ops as inner
 from mindspore.ops.operations import _quant_ops as Q
 from mindspore.ops.operations import nn_ops as nps
+from mindspore.nn.layer import normalization
 from ..ut_filter import non_graph_engine
 from ....mindspore_test_framework.mindspore_test import mindspore_test
 from ....mindspore_test_framework.pipeline.forward.compile_forward \
@@ -227,6 +228,30 @@ class Moments(nn.Cell):
     def construct(self, input_x):
         mean, variance = self.moments(input_x)
         return mean, variance
+
+
+class BatchNorm3d(nn.Cell):
+    """BatchNorm3d net definition"""
+
+    def __init__(self, num_features):
+        super(BatchNorm3d, self).__init__()
+        self.bn3d = normalization.BatchNorm3d(num_features=num_features)
+
+    def construct(self, input_x):
+        bn3d_out = self.bn3d(input_x)
+        return bn3d_out
+
+
+class NLLLoss(nn.Cell):
+    """NLLLoss net definition"""
+
+    def __init__(self, reduction):
+        super(NLLLoss, self).__init__()
+        self.nll_loss = P.NLLLoss(reduction=reduction)
+
+    def construct(self, input_x, target, weight):
+        loss = self.nll_loss(input_x, target, weight)
+        return loss
 
 
 class ClipByNorm(nn.Cell):
@@ -1240,6 +1265,16 @@ test_case_math_ops = [
         'block': Moments(axis=(), keep_dims=False),
         'desc_inputs': [Tensor(np.random.rand(3, 16, 5, 4).astype(np.float32))],
         'skip': ['backward']}),
+    ('NLLLoss', {
+        'block': NLLLoss(reduction="mean"),
+        'desc_inputs': [Tensor(np.random.rand(3, 16), mstype.float32),
+                        Tensor(np.random.rand(3), mstype.int32),
+                        Tensor(np.random.rand(16), mstype.float32)],
+        'desc_bprop': [(Tensor(np.random.rand(1), mstype.float32), Tensor(np.random.rand(1), mstype.float32))]}),
+    ('BatchNorm3d', {
+        'block': BatchNorm3d(num_features=3),
+        'desc_inputs': [Tensor(np.random.rand(3, 3, 3, 5, 4).astype(np.float32))],
+        'skip': ['backward']}),
     ('Conv3D', {
         'block': Conv3D(out_channel=32, kernel_size=(4, 3, 3), mode=1, pad_mode='valid', pad=0,
                         stride=1, dilation=1, group=1, data_format="NCDHW"),
@@ -1673,6 +1708,10 @@ test_case_nn_ops = [
         'desc_inputs': [[20, 20, 10]],
         'desc_bprop': [[20, 20, 5]],
         'skip': ['backward']}),
+    ('Sort', {
+        'block': P.Sort(),
+        'desc_inputs': [[2, 3, 4]],
+        'desc_bprop': [[2, 3, 4], ([2, 3, 4], {'dtype': np.int32})]}),
     ('GatherV2_0', {
         'block': P.GatherV2(),
         'desc_const': [0],

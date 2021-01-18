@@ -82,7 +82,7 @@ void BucketBatchByLengthNode::Print(std::ostream &out) const {
   out << ")";
 }
 
-Status BucketBatchByLengthNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
+Status BucketBatchByLengthNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   bucket_boundaries_.insert(bucket_boundaries_.begin(), 0);
   node_ops->push_back(std::make_shared<BucketBatchByLengthOp>(
     column_names_, bucket_boundaries_, bucket_batch_sizes_, element_length_function_, pad_info_,
@@ -94,6 +94,7 @@ Status BucketBatchByLengthNode::Build(std::vector<std::shared_ptr<DatasetOp>> *n
 }
 
 Status BucketBatchByLengthNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   if (element_length_function_ == nullptr && column_names_.size() != 1) {
     std::string err_msg =
       "BucketBatchByLengthNode: when element_length_function is not specified, size of column_name must be 1 but is: " +

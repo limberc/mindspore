@@ -178,6 +178,12 @@ BuiltInTypeMap &GetMethodMap() {
                                          {"__ms_to_array__", prim::kPrimIdentity},        // P.identity,
                                          {"item", prim::kPrimArrayToScalar},              // P.array_to_scalar,
                                          {"transpose", std::string("transpose")},         // P.transpose
+                                         {"flatten", std::string("flatten")},             // P.reshape(,-1)
+                                         {"reshape", std::string("reshape")},             // P.reshape()
+                                         {"ravel", std::string("ravel")},                 // P.reshape(,(-1,))
+                                         {"swapaxes", std::string("swapaxes")},           // P.transpose()
+                                         {"squeeze", std::string("squeeze")},             // P.squeeze()
+                                         {"astype", std::string("astype")},               // P.cast()
                                          {"__bool__", std::string("tensor_bool")},        // C.tensor_bool
                                        }},
                                       {kObjectTypeJTagged, {}},
@@ -190,8 +196,14 @@ BuiltInTypeMap &GetAttrMap() {
   static BuiltInTypeMap attr_map = {
     {kObjectTypeTensorType,
      {
-       {"shape", std::string("shape_")},  // C.shape_
-       {"dtype", std::string("dtype_")},  // C.dtype_
+       {"shape", std::string("shape_")},        // C.shape_
+       {"dtype", std::string("dtype_")},        // C.dtype_
+       {"size", std::string("size_")},          // C.size_
+       {"ndim", std::string("ndim_")},          // C.ndim_
+       {"T", std::string("T_")},                // C.T_
+       {"itemsize", std::string("itemsize_")},  // C.itemsize_
+       {"nbytes", std::string("nbytes_")},      // C.nbytes_
+       {"strides", std::string("strides_")},    // C.strides_
      }},
     {kObjectTypeRowTensorType,
      {
@@ -275,39 +287,6 @@ Any Resource::GetAttrPtr(const TypeId &type, const std::string &name) {
   return GetMethodOrAttr(name, type_id, attr_map);
 }
 
-std::unordered_map<PrimitivePy *, bool> Resource::py_objs_ = std::unordered_map<PrimitivePy *, bool>();
-void Resource::RecordPrimitivePy(PrimitivePy *prim) {
-  if (prim == nullptr) {
-    return;
-  }
-  py_objs_[prim] = true;
-}
-
-void Resource::ErasePrimitivePy(PrimitivePy *prim) {
-  if (prim == nullptr) {
-    return;
-  }
-  auto it = py_objs_.find(prim);
-  if (it == py_objs_.end()) {
-    return;
-  }
-  // If flag is false,the pointer hased been released, so it can't be visited.
-  if (!it->second) {
-    return;
-  }
-  py_objs_[prim] = false;
-  prim->SetPyObj(py::none());
-}
-
-void Resource::ClearPrimitivePyPythonObj() {
-  for (auto &it : py_objs_) {
-    if (it.second) {
-      it.first->SetPyObj(py::none());
-    }
-  }
-  py_objs_.clear();
-}
-
 void Resource::Clean() {
   // AbstractTensor->elements() will be saved in AbstractBasePtrList
   args_spec_.clear();
@@ -325,5 +304,92 @@ void Resource::Clean() {
   trace::ClearTraceStack();
   is_cleaned_ = true;
 }
+
+void MemoryCleaner::Init() {
+  pynative_in_construct_process_ = false;
+  pynative_in_end_graph_process_ = false;
+  pynative_released_history_.clear();
+  pynative_new_primtives_squence_.clear();
+}
+
+MemoryCleaner Resource::mem_cleaner_ = MemoryCleaner();
+void MemoryCleaner::RecordPrimitivePy(PrimitivePy *prim) {
+  if (prim == nullptr) {
+    return;
+  }
+  all_primitives_[prim] = true;
+}
+
+void MemoryCleaner::ReleasePrimitivePyObj(PrimitivePy *prim) {
+  if (prim == nullptr) {
+    return;
+  }
+  auto it = all_primitives_.find(prim);
+  if (it == all_primitives_.end()) {
+    return;
+  }
+  // If flag is false,the pointer hased been released, so it can't be visited.
+  if (!it->second) {
+    return;
+  }
+  all_primitives_[prim] = false;
+  prim->SetPyObj(py::none());
+}
+
+void MemoryCleaner::ClearPrimitivePyPythonObj() {
+  for (auto &it : all_primitives_) {
+    if (it.second) {
+      it.first->SetPyObj(py::none());
+    }
+  }
+  all_primitives_.clear();
+}
+
+void MemoryCleaner::RecordPynativeShortLifePrimitivePy(PrimitivePy *prim) {
+  if (prim == nullptr) {
+    return;
+  }
+  if (pynative_short_life_primitives_.find(prim) != pynative_short_life_primitives_.end()) {
+    return;
+  }
+  MS_LOG(DEBUG) << "Record pynative tmp primitve:" << prim->ToString();
+  pynative_short_life_primitives_.insert(prim);
+  pynative_new_primtives_squence_.push_back(prim->ToString());
+}
+
+void MemoryCleaner::ErasePynativeShortLifePrimitivePy(PrimitivePy *prim) {
+  if (prim == nullptr) {
+    return;
+  }
+  if (pynative_short_life_primitives_.find(prim) == pynative_short_life_primitives_.end()) {
+    return;
+  }
+  pynative_short_life_primitives_.erase(prim);
+  MS_LOG(DEBUG) << "Erase pynative tmp primitive:" << prim->ToString();
+}
+
+void MemoryCleaner::ClearPynativeShortLifePrimitivePy() {
+  // If the primitives name sequence never been released before, keep the primtives alive
+  if (std::find(pynative_released_history_.begin(), pynative_released_history_.end(),
+                pynative_new_primtives_squence_) == pynative_released_history_.end()) {
+    pynative_released_history_.push_back(pynative_new_primtives_squence_);
+  } else {
+    for (auto &primitive : pynative_short_life_primitives_) {
+      ReleasePrimitivePyObj(primitive);
+    }
+  }
+  pynative_short_life_primitives_.clear();
+  pynative_new_primtives_squence_.clear();
+}
+
+void MemoryCleaner::EnterPynativeConstructProcess() { pynative_in_construct_process_ = true; }
+void MemoryCleaner::LeavePynativeConstructProcess() {
+  pynative_in_construct_process_ = false;
+  ClearPynativeShortLifePrimitivePy();
+}
+bool MemoryCleaner::IsInPynativeConstructProcess() const { return pynative_in_construct_process_; }
+void MemoryCleaner::EnterPynativeEndGraphProcess() { pynative_in_end_graph_process_ = true; }
+void MemoryCleaner::LeavePynativeEndGraphProcess() { pynative_in_end_graph_process_ = false; }
+bool MemoryCleaner::IsInPynativeEndGraphProcess() const { return pynative_in_end_graph_process_; }
 }  // namespace pipeline
 }  // namespace mindspore

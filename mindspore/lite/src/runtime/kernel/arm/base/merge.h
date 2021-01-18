@@ -17,31 +17,31 @@
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_BASE_MERGE_H_
 
 #include <vector>
-#include "src/lite_kernel.h"
+#include "src/runtime/kernel/arm/base/carry_data.h"
+#include "src/tensor.h"
+#include "src/tensorlist.h"
 
 namespace mindspore::kernel {
+enum InputPart { UNKNOWN_INPUT_PART, LEFT_INPUT_PART, RIGHT_INPUT_PART };
 
-typedef struct MergeParameter {
-  OpParameter op_parameter_;
-} MergeParameter;
-
-class MergeCPUKernel : public LiteKernel {
+class MergeCPUKernel : public CarryDataKernel {
  public:
   MergeCPUKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
                  const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
                  const mindspore::lite::PrimitiveC *primitive)
-      : LiteKernel(parameter, inputs, outputs, ctx, primitive) {
-    merge_param_ = reinterpret_cast<MergeParameter *>(op_parameter_);
-  }
-  ~MergeCPUKernel() override {}
-  int FreeInWorkTensor() const override;
+      : CarryDataKernel(parameter, inputs, outputs, ctx, primitive) {}
   bool IsReady(const std::vector<lite::Tensor *> &scope_tensors) override;
+  ~MergeCPUKernel() override = default;
+  int FreeInWorkTensor() const override;
   int Init() override;
   int ReSize() override;
   int Run() override;
 
  private:
-  MergeParameter *merge_param_ = nullptr;
+  InputPart FindReadyPart(const std::vector<lite::Tensor *> &scope_tensors);
+
+ private:
+  InputPart ready_part_ = UNKNOWN_INPUT_PART;
 };
 }  // namespace mindspore::kernel
 

@@ -16,8 +16,7 @@
 
 #include "src/sub_graph_kernel.h"
 #include "src/tensor.h"
-#ifdef ENABLE_ARM64
-#include "src/common/utils.h"
+#if defined(ENABLE_ARM64) && defined(ENABLE_FP16)
 #include "src/runtime/kernel/arm/fp16/fp16_op_handler.h"
 #endif
 
@@ -115,11 +114,7 @@ int SubGraphKernel::ReSize(bool is_interrupt) {
     std::vector<lite::Tensor *> inputs = kernel->in_tensors();
     std::vector<lite::Tensor *> outputs = kernel->out_tensors();
     for (auto &output : outputs) {
-      auto ret = output->FreeData();
-      if (ret != RET_OK) {
-        MS_LOG(ERROR) << "FreeData failed";
-        return RET_ERROR;
-      }
+      output->FreeData();
     }
     primitive->set_infer_flag(!is_interrupt);
     auto ret = primitive->InferShape(inputs, outputs);
@@ -179,6 +174,7 @@ int CpuSubGraph::Prepare() {
   return RET_OK;
 }
 
+#ifdef ENABLE_FP16
 void CpuFp16SubGraph::FreeOriginInputData() {
   for (auto *data_store : this->origin_input_data_) {
     if (data_store == nullptr) {
@@ -238,6 +234,9 @@ int CpuFp16SubGraph::PreProcess() {
   }
   for (auto kernel : this->nodes_) {
     for (auto tensor : kernel->out_tensors()) {
+      if (kernel->Type() == schema::PrimitiveType_Cast) {
+        continue;
+      }
       if (tensor->data_type() == kNumberTypeFloat32) {
         tensor->set_data_type(kNumberTypeFloat16);
       }
@@ -285,10 +284,10 @@ int CpuFp16SubGraph::PostProcess() {
   for (size_t i = 0; i < this->in_tensors_.size(); i++) {
     auto tensor = in_tensors_.at(i);
     MS_ASSERT(tensor != nullptr);
-    if (tensor->data_type() == kNumberTypeFloat16) {
+    auto origin_tensor_data = origin_input_data_.at(i);
+    if (tensor->data_type() == kNumberTypeFloat16 && origin_tensor_data != nullptr) {
+      MS_ASSERT(tensor != nullptr);
       tensor->FreeData();
-      auto origin_tensor_data = origin_input_data_.at(i);
-      MS_ASSERT(origin_tensor_data != nullptr);
       MS_ASSERT(origin_tensor_data->data_ != nullptr);
       tensor->set_data(origin_tensor_data->data_);
       tensor->set_data_type(kNumberTypeFloat32);
@@ -301,4 +300,5 @@ int CpuFp16SubGraph::PostProcess() {
   return RET_OK;
 #endif
 }
+#endif
 }  // namespace mindspore::kernel

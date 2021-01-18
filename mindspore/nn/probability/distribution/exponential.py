@@ -51,12 +51,10 @@ class Exponential(Distribution):
         >>> # An Exponential distribution can be initialized without arguments.
         >>> # In this case, `rate` must be passed in through `args` during function calls.
         >>> e2 = msd.Exponential(dtype=mindspore.float32)
-
         >>> # Here are some tensors used below for testing
         >>> value = Tensor([1, 2, 3], dtype=mindspore.float32)
         >>> rate_a = Tensor([0.6], dtype=mindspore.float32)
         >>> rate_b = Tensor([0.2, 0.5, 0.4], dtype=mindspore.float32)
-
         >>> # Private interfaces of probability functions corresponding to public interfaces, including
         >>> # `prob`, `log_prob`, `cdf`, `log_cdf`, `survival_function`, and `log_survival`, are the same as follows.
         >>> # Args:
@@ -66,30 +64,30 @@ class Exponential(Distribution):
         >>> # Similar calls can be made to other probability functions
         >>> # by replacing `prob` by the name of the function.
         >>> ans = e1.prob(value)
-        >>> print(ans)
-        [0.30326533 0.18393973 0.11156508]
+        >>> print(ans.shape)
+        (3,)
         >>> # Evaluate with respect to distribution b.
         >>> ans = e1.prob(value, rate_b)
-        >>> print(ans)
-        [0.16374615 0.18393973 0.12047768]
+        >>> print(ans.shape)
+        (3,)
         >>> # `rate` must be passed in during function calls.
         >>> ans = e2.prob(value, rate_a)
-        >>> print(ans)
-        [0.329287   0.18071651 0.09917933]
+        >>> print(ans.shape)
+        (3,)
         >>> # Functions `mean`, `sd`, 'var', and 'entropy' have the same arguments as follows.
         >>> # Args:
         >>> #     rate (Tensor): the rate of the distribution. Default: self.rate.
         >>> # Examples of `mean`. `sd`, `var`, and `entropy` are similar.
         >>> ans = e1.mean() # return 2
-        >>> print(ans)
-        2.0
+        >>> print(ans.shape)
+        ()
         >>> ans = e1.mean(rate_b) # return 1 / rate_b
-        >>> print(ans)
-        [5.  2.  2.5]
+        >>> print(ans.shape)
+        (3,)
         >>> # `rate` must be passed in during function calls.
         >>> ans = e2.mean(rate_a)
-        >>> print(ans)
-        [1.6666666]
+        >>> print(ans.shape)
+        (1,)
         >>> # Interfaces of `kl_loss` and `cross_entropy` are the same.
         >>> # Args:
         >>> #     dist (str): The name of the distribution. Only 'Exponential' is supported.
@@ -97,15 +95,15 @@ class Exponential(Distribution):
         >>> #     rate_a (Tensor): the rate of distribution a. Default: self.rate.
         >>> # Examples of `kl_loss`. `cross_entropy` is similar.
         >>> ans = e1.kl_loss('Exponential', rate_b)
-        >>> print(ans)
-        [0.31629074 0.         0.02314353]
+        >>> print(ans.shape)
+        (3,)
         >>> ans = e1.kl_loss('Exponential', rate_b, rate_a)
-        >>> print(ans)
-        [0.43194556 0.01565492 0.07213175]
+        >>> print(ans.shape)
+        (3,)
         >>> # An additional `rate` must be passed in.
         >>> ans = e2.kl_loss('Exponential', rate_b, rate_a)
-        >>> print(ans)
-        [0.43194556 0.01565492 0.07213175]
+        >>> print(ans.shape)
+        (3,)
         >>> # Examples of `sample`.
         >>> # Args:
         >>> #     shape (tuple): the shape of the sample. Default: ()
@@ -167,7 +165,7 @@ class Exponential(Distribution):
     @property
     def rate(self):
         """
-        Return `rate` of the distribution after casting to self.dtype.
+        Return `rate` of the distribution after casting to dtype.
         """
         return self._rate
 

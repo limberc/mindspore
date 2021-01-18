@@ -35,6 +35,7 @@ ConcatNode::ConcatNode(const std::vector<std::shared_ptr<DatasetNode>> &datasets
     : sampler_(sampler),
       children_flag_and_nums_(children_flag_and_nums),
       children_start_end_index_(children_start_end_index) {
+  nary_op_ = true;
   for (auto const &child : datasets) AddChild(child);
 }
 
@@ -49,6 +50,7 @@ std::shared_ptr<DatasetNode> ConcatNode::Copy() {
 void ConcatNode::Print(std::ostream &out) const { out << Name(); }
 
 Status ConcatNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   if (children_.size() < 2) {
     std::string err_msg = "ConcatNode: concatenated datasets are not specified.";
     MS_LOG(ERROR) << err_msg;
@@ -71,7 +73,7 @@ Status ConcatNode::ValidateParams() {
   return Status::OK();
 }
 
-Status ConcatNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
+Status ConcatNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   if (children_flag_and_nums_.empty() || children_start_end_index_.empty()) {
     node_ops->push_back(std::make_shared<ConcatOp>(connector_que_size_));
   } else {
@@ -83,13 +85,13 @@ Status ConcatNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
 }
 
 // Visitor accepting method for IRNodePass
-Status ConcatNode::Accept(IRNodePass *p, bool *modified) {
+Status ConcatNode::Accept(IRNodePass *const p, bool *const modified) {
   // Downcast shared pointer then call visitor
   return p->Visit(shared_from_base<ConcatNode>(), modified);
 }
 
 // Visitor accepting method for IRNodePass
-Status ConcatNode::AcceptAfter(IRNodePass *p, bool *modified) {
+Status ConcatNode::AcceptAfter(IRNodePass *const p, bool *const modified) {
   // Downcast shared pointer then call visitor
   return p->VisitAfter(shared_from_base<ConcatNode>(), modified);
 }

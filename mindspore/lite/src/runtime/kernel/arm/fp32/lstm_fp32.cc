@@ -15,6 +15,7 @@
  */
 
 #include "src/runtime/kernel/arm/fp32/lstm_fp32.h"
+#include <float.h>
 #include <vector>
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
@@ -31,6 +32,10 @@ void LstmCPUKernel::FreeTmpBuffer() {
   if (gate_buffer_ != nullptr) {
     free(gate_buffer_);
     gate_buffer_ = nullptr;
+  }
+  if (state_buffer_ != nullptr) {
+    free(state_buffer_);
+    state_buffer_ = nullptr;
   }
   if (weight_i_ptr_ != nullptr) {
     free(weight_i_ptr_);
@@ -70,6 +75,14 @@ int LstmCPUKernel::InitBuffer() {
   if (gate_buffer_ == nullptr) {
     MS_LOG(ERROR) << "LstmCPUKernel malloc gate_buffer error.";
     return RET_ERROR;
+  }
+  if (!(lstm_parm_->smooth_ >= -FLT_EPSILON && lstm_parm_->smooth_ <= FLT_EPSILON)) {
+    int buffer_size = 2 * lstm_parm_->batch_ * lstm_parm_->hidden_size_ * sizeof(float);
+    state_buffer_ = reinterpret_cast<float *>(malloc(buffer_size));
+    if (state_buffer_ == nullptr) {
+      MS_LOG(ERROR) << "LstmCPUKernel malloc state_buffer error.";
+      return RET_ERROR;
+    }
   }
   return RET_OK;
 }
@@ -173,35 +186,9 @@ int LstmCPUKernel::Run() {
   MS_ASSERT(gate_buffer_);
   Lstm(output_ptr, input_ptr, weight_i_ptr_, weight_h_ptr_, bias_ptr_,
        reinterpret_cast<float *>(output_hidden_state->MutableData()),
-       reinterpret_cast<float *>(output_cell_state->MutableData()), gate_buffer_, lstm_parm_);
+       reinterpret_cast<float *>(output_cell_state->MutableData()), gate_buffer_, state_buffer_, lstm_parm_);
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuLstmKernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                         const std::vector<lite::Tensor *> &outputs, OpParameter *parameter,
-                                         const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                         const mindspore::lite::PrimitiveC *primitive) {
-  if (parameter == nullptr) {
-    MS_LOG(ERROR) << "Input parameter is nullptr!";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_Lstm);
-
-  auto *kernel = new (std::nothrow) LstmCPUKernel(parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "kernel is nullptr.";
-    free(parameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << parameter->name_
-                  << ", type: " << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(parameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Lstm, CpuLstmKernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Lstm, LiteKernelCreator<LstmCPUKernel>)
 }  // namespace mindspore::kernel

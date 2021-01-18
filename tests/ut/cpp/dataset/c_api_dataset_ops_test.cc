@@ -15,6 +15,7 @@
  */
 #include "common/common.h"
 #include "minddata/dataset/core/tensor_row.h"
+#include "minddata/dataset/engine/ir/datasetops/dataset_node.h"
 #include "minddata/dataset/include/datasets.h"
 #include "minddata/dataset/include/vision.h"
 
@@ -1832,4 +1833,31 @@ TEST_F(MindDataTestPipeline, TestZipSuccess2) {
 
   // Manually terminate the pipeline
   iter->Stop();
+}
+
+TEST_F(MindDataTestPipeline, TestNumWorkersValidate) {
+  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestNumWorkersValidate.";
+
+  // Create an ImageFolder Dataset
+  std::string folder_path = datasets_root_path_ + "/testPK/data/";
+  std::shared_ptr<Dataset> ds = ImageFolder(folder_path, false, SequentialSampler(0, 1));
+
+  // ds needs to be non nullptr otherwise, the subsequent logic will core dump
+  ASSERT_NE(ds, nullptr);
+
+  // test if set num_workers=-1
+  EXPECT_EQ(ds->SetNumWorkers(-1)->CreateIterator(), nullptr);
+
+  // test if set num_workers can be very large
+  EXPECT_EQ(ds->SetNumWorkers(INT32_MAX)->CreateIterator(), nullptr);
+
+  int32_t cpu_core_cnt = GlobalContext::config_manager()->num_cpu_threads();
+
+  // only do this test if cpu_core_cnt can be successfully obtained
+  if (cpu_core_cnt > 0) {
+    EXPECT_EQ(ds->SetNumWorkers(cpu_core_cnt + 1)->CreateIterator(), nullptr);
+    // verify setting num_worker to 1 or cpu_core_cnt is allowed
+    ASSERT_OK(ds->SetNumWorkers(cpu_core_cnt)->IRNode()->ValidateParams());
+    ASSERT_OK(ds->SetNumWorkers(1)->IRNode()->ValidateParams());
+  }
 }

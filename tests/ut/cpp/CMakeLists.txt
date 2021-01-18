@@ -4,12 +4,12 @@ message("build ut testcases...")
 project(ut)
 
 set(PROJECT_DIR "${PROJECT_SOURCE_DIR}/../../..")
-if(ENABLE_DUMP_IR)
+if (ENABLE_DUMP_IR)
     add_compile_definitions(ENABLE_DUMP_IR)
-endif(ENABLE_DUMP_IR)
-if(ENABLE_D)
+endif (ENABLE_DUMP_IR)
+if (ENABLE_D)
     add_compile_definitions(ENABLE_D)
-endif()
+endif ()
 
 #add python lib and include for all ut executables;
 message("PYTHON_INCLUDE_DIRS = ${PYTHON_INCLUDE_DIRS}")
@@ -25,13 +25,13 @@ MESSAGE("check  ut_test ${CMAKE_BINARY_DIR}")
 
 link_directories(${MS_CCSRC_BUILD_PATH})
 
-if(ENABLE_MINDDATA)
+if (ENABLE_MINDDATA)
     add_definitions(-D ENABLE_MINDDATA)
     link_directories(${MS_CCSRC_BUILD_PATH}/minddata/dataset)
     link_directories(${MS_CCSRC_BUILD_PATH}/minddata/mindrecord)
-endif()
+endif ()
 # fetch ut test files
-if(ENABLE_MINDDATA)
+if (ENABLE_MINDDATA)
     include_directories(${CMAKE_SOURCE_DIR}/mindspore/ccsrc/minddata/dataset/kernels/image)
     file(GLOB_RECURSE UT_SRCS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
             ./stub/*.cc
@@ -39,6 +39,8 @@ if(ENABLE_MINDDATA)
             ./abstract/*.cc
             ./base/*.cc
             ./dataset/*.cc
+            ./c_ops/*.cc
+            ./ir/dtype/*.cc
             ${CMAKE_SOURCE_DIR}/mindspore/ccsrc/minddata/dataset/kernels/image/lite_cv/*.cc
             ./debug/*.cc
             ./device/*.cc
@@ -58,24 +60,24 @@ if(ENABLE_MINDDATA)
             ./ps/*.cc
             ./cxx_api/*.cc
             )
-   
-    if(NOT ENABLE_PYTHON)
+
+    if (NOT ENABLE_PYTHON)
         set(PYTHON_RELATED_SRCS
-            dataset/filter_op_test.cc
-            dataset/voc_op_test.cc
-            dataset/manifest_op_test.cc
-            dataset/sentence_piece_vocab_op_test.cc
-        )
+                dataset/filter_op_test.cc
+                dataset/voc_op_test.cc
+                dataset/manifest_op_test.cc
+                dataset/sentence_piece_vocab_op_test.cc
+                )
         list(REMOVE_ITEM UT_SRCS ${PYTHON_RELATED_SRCS})
-    endif()
-else()
+    endif ()
+else ()
     file(GLOB_RECURSE TEMP_UT_SRCS ./*.cc)
-    foreach(OBJ ${TEMP_UT_SRCS})
+    foreach (OBJ ${TEMP_UT_SRCS})
         if (NOT ${OBJ} MATCHES "./dataset/" AND NOT ${OBJ} MATCHES "./mindrecord/")
             list(APPEND UT_SRCS ${OBJ})
-        endif()
+        endif ()
     endforeach ()
-endif()
+endif ()
 
 file(GLOB_RECURSE MINDSPORE_SRC_LIST RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
         "../../../mindspore/ccsrc/pybind_api/*.cc"
@@ -85,8 +87,6 @@ file(GLOB_RECURSE MINDSPORE_SRC_LIST RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
         # dont remove the 4 lines above
         "../../../mindspore/ccsrc/debug/data_dump/dump_json_parser.cc"
         "../../../mindspore/ccsrc/debug/common.cc"
-        "../../../mindspore/ccsrc/runtime/device/ascend/profiling/profiling_manager.cc"
-        "../../../mindspore/ccsrc/runtime/device/ascend/profiling/profiling_engine_impl.cc"
         "../../../mindspore/ccsrc/runtime/device/kernel_runtime.cc"
         "../../../mindspore/ccsrc/runtime/device/memory_manager.cc"
         "../../../mindspore/ccsrc/runtime/device/kernel_runtime_manager.cc"
@@ -97,6 +97,7 @@ file(GLOB_RECURSE MINDSPORE_SRC_LIST RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
         "../../../mindspore/ccsrc/runtime/device/convert_tensor_utils.cc"
         "../../../mindspore/ccsrc/runtime/device/ascend/kernel_build_ascend.cc"
         "../../../mindspore/ccsrc/runtime/device/ascend/ascend_kernel_runtime.cc"
+        "../../../mindspore/ccsrc/runtime/device/ascend/signal_util.cc"
         "../../../mindspore/ccsrc/runtime/device/ascend/ascend_memory_manager.cc"
         "../../../mindspore/ccsrc/runtime/device/ascend/ascend_device_address.cc"
         "../../../mindspore/ccsrc/runtime/device/ascend/ascend_memory_pool.cc"
@@ -111,6 +112,7 @@ file(GLOB_RECURSE MINDSPORE_SRC_LIST RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
         "../../../mindspore/ccsrc/backend/kernel_compiler/cpu/adam_delta_cpu_kernel.cc"
         "../../../mindspore/ccsrc/backend/kernel_compiler/akg/*.cc"
         "../../../mindspore/ccsrc/backend/kernel_compiler/rts/*.cc"
+        "../../../mindspore/core/c_ops/*.cc"
         "../../../mindspore/ccsrc/backend/kernel_compiler/hccl/*.cc"
         "../../../mindspore/ccsrc/backend/kernel_compiler/kernel_query.cc"
         "../../../mindspore/ccsrc/backend/kernel_compiler/aicpu/aicpu_kernel_metadata.cc"
@@ -124,6 +126,7 @@ file(GLOB_RECURSE MINDSPORE_SRC_LIST RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
         "../../../mindspore/ccsrc/backend/session/kernel_graph.cc"
         "../../../mindspore/ccsrc/backend/session/session_basic.cc"
         "../../../mindspore/ccsrc/backend/session/executor.cc"
+        "../../../mindspore/core/c_ops/*.cc"
         "../../../mindspore/ccsrc/backend/session/executor_manager.cc"
         "../../../mindspore/ccsrc/backend/session/session_factory.cc"
         "../../../mindspore/ccsrc/backend/session/kernel_build_client.cc"
@@ -149,33 +152,33 @@ add_library(_ut_mindspore_obj OBJECT ${MINDSPORE_SRC_LIST})
 add_library(_ut_ut_obj OBJECT ${UT_SRCS})
 add_dependencies(_ut_ut_obj engine-cache-server)
 add_executable(ut_tests $<TARGET_OBJECTS:_ut_ut_obj>
-                        $<TARGET_OBJECTS:_ut_mindspore_obj>)
+        $<TARGET_OBJECTS:_ut_mindspore_obj>)
 
 if (ENABLE_GE)
-    if(ENABLE_TRAIN)
+    if (ENABLE_TRAIN)
         target_link_libraries(ut_tests PRIVATE graph ge_runner)
-    else()
+    else ()
         target_link_libraries(ut_tests PRIVATE graph ge_client)
-    endif()
+    endif ()
 
     target_link_libraries(mindspore PRIVATE tsdclient)
-endif()
+endif ()
 
 if (CMAKE_SYSTEM_NAME MATCHES "Linux")
     target_link_libraries(ut_tests PRIVATE mindspore::gtest mindspore::event mindspore::event_pthreads mindspore_gvar ${PYTHON_LIBRARIES} pthread util dl)
     if (ENABLE_MINDDATA)
-      
+
         # AUX_SOURCE_DIRECTORY(LITE_CV_FILES)
         # message(STATUS "xxxxxxxxxxxxxxxxx"${LITE_CV_FILES} )
         # add_library(_live_cv OBJECT ${LITE_CV_FILES})
 
         target_link_libraries(ut_tests PRIVATE _c_dataengine _c_mindrecord)
-    endif()
-else()
+    endif ()
+else ()
     target_link_libraries(ut_tests PRIVATE mindspore::gtest mindspore_gvar ${PYTHON_LIBRARIES})
-endif()
+endif ()
 if (USE_GLOG)
     target_link_libraries(ut_tests PRIVATE mindspore::glog)
-endif()
+endif ()
 
 target_link_libraries(ut_tests PRIVATE mindspore mindspore_shared_lib securec graph)

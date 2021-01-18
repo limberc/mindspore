@@ -49,6 +49,10 @@ void *DefaultAllocator::Malloc(size_t size) {
     MS_LOG(ERROR) << "MallocData out of max_size, size: " << size;
     return nullptr;
   }
+  if (this->total_size_ >= MAX_THREAD_POOL_SIZE) {
+    MS_LOG(ERROR) << "Memory pool is exhausted";
+    return nullptr;
+  }
   Lock();
   auto iter = freeList_.lower_bound(size);
   if (iter != freeList_.end() && (iter->second->size >= size) && (iter->second->size < (size << shiftFactor_))) {
@@ -65,6 +69,7 @@ void *DefaultAllocator::Malloc(size_t size) {
     UnLock();
     return nullptr;
   }
+  this->total_size_ += size;
   membuf->size = size;
   membuf->buf = reinterpret_cast<char *>(membuf.get()) + sizeof(MemBuf);
   auto bufPtr = membuf->buf;
@@ -89,23 +94,6 @@ void DefaultAllocator::Free(void *buf) {
   UnLock();
   free(buf);
   buf = nullptr;
-}
-
-size_t DefaultAllocator::GetTotalSize() {
-  Lock();
-  size_t totalSize = 0;
-
-  for (auto &it : allocatedList_) {
-    auto membuf = it.second;
-    totalSize += membuf->size;
-  }
-
-  for (auto &it : freeList_) {
-    auto membuf = it.second;
-    totalSize += membuf->size;
-  }
-  UnLock();
-  return totalSize;
 }
 
 void DefaultAllocator::Clear() {

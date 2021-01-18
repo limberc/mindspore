@@ -15,15 +15,8 @@
  */
 
 #include "nnacl/int8/mul_int8.h"
-#include "nnacl/mul_parameter.h"
-#ifdef ENABLE_NEON
-#include <arm_neon.h>
-#include "nnacl/int8/common_func_int8.h"
-#endif
-#include "nnacl/quantization/fixed_point.h"
 
 #ifdef ENABLE_NEON
-
 int16x4_t ClacSumHalfWordMul(int16x4_t scaled_input0, int16x4_t scaled_input1, int32x4_t left_shift_out_vec,
                              int32x4_t right_shift_out_vec, int32x4_t output_multiplier_vec) {
   int32x4_t input_scale = vmull_s16(scaled_input0, scaled_input1);
@@ -236,8 +229,7 @@ void Mul(int8_t *input0_data, int8_t *input1_data, int8_t *output_data, int64_t 
     mul_result += para.out_quant_arg_.zp_;
     mul_result = mul_result < para.output_activation_max_ ? mul_result : para.output_activation_max_;
     mul_result = mul_result > para.output_activation_min_ ? mul_result : para.output_activation_min_;
-    output_data[0] = (int8_t)mul_result;
-    output_data++;
+    output_data[index] = (int8_t)mul_result;
   }
   return;
 }

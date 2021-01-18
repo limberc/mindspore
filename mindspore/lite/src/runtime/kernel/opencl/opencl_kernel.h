@@ -25,7 +25,8 @@
 #include "src/lite_kernel.h"
 #include "include/errorcode.h"
 #include "src/runtime/opencl/opencl_runtime.h"
-#include "src/runtime/kernel/arm/base/dequant.h"
+#include "mindspore/lite/src/dequant.h"
+#include "src/runtime/kernel/opencl/utils.h"
 
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
@@ -181,6 +182,7 @@ class OpenCLKernel : public LiteKernel {
   virtual int Tune();
 
   int GetImageSize(size_t idx, std::vector<size_t> *img_size);
+  void PrintOutput(int print_num = 10, const std::string &out_file = "");
   lite::opencl::MemType GetMemType() { return out_mem_type_; }
   void SetMemType(lite::opencl::MemType mem_type) { out_mem_type_ = mem_type; }
   OpParameter *GetParameter() { return op_parameter_; }
@@ -209,6 +211,7 @@ class OpenCLKernel : public LiteKernel {
   std::vector<size_t> local_size_;
   cl::Kernel kernel_;
   cl::Event event_;
+  void *restore_quant_data_{nullptr};
   bool dequant_flag_{false};
 
  private:

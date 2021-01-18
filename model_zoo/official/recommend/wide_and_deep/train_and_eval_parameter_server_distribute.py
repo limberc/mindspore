@@ -17,13 +17,14 @@
 
 import os
 import sys
-import mindspore.dataset.engine as de
+import mindspore.dataset as ds
 from mindspore import Model, context
 from mindspore.train.callback import ModelCheckpoint, CheckpointConfig, TimeMonitor
 from mindspore.context import ParallelMode
 from mindspore.communication.management import get_rank, get_group_size, init
 from mindspore.nn.wrap.cell_wrapper import VirtualDatasetCellTriple
 from mindspore.common import set_seed
+from mindspore.parallel._ps_context import _is_role_worker
 
 from src.wide_and_deep import PredictWithSigmoid, TrainStepWrap, NetWithLossClass, WideDeepModel
 from src.callbacks import LossCallBack, EvalCallBack
@@ -91,7 +92,7 @@ def train_and_eval(config):
     print("epochs is {}".format(epochs))
     if config.full_batch:
         context.set_auto_parallel_context(full_batch=True)
-        de.config.set_seed(1)
+        ds.config.set_seed(1)
         ds_train = create_dataset(data_path, train_mode=True, epochs=1,
                                   batch_size=batch_size*get_group_size(), data_type=dataset_type)
         ds_eval = create_dataset(data_path, train_mode=False, epochs=1,
@@ -114,19 +115,24 @@ def train_and_eval(config):
 
     model = Model(train_net, eval_network=eval_net, metrics={"auc": auc_metric})
 
+    if cache_enable:
+        config.stra_ckpt = os.path.join(config.stra_ckpt + "-{}".format(get_rank()), "strategy.ckpt")
+        context.set_auto_parallel_context(strategy_ckpt_save_file=config.stra_ckpt)
+
     eval_callback = EvalCallBack(model, ds_eval, auc_metric, config)
 
     callback = LossCallBack(config=config)
-    if cache_enable:
-        ckptconfig = CheckpointConfig(save_checkpoint_steps=ds_train.get_dataset_size()*epochs,
-                                      keep_checkpoint_max=5, integrated_save=False)
+    if _is_role_worker():
+        if cache_enable:
+            ckptconfig = CheckpointConfig(save_checkpoint_steps=ds_train.get_dataset_size()*epochs,
+                                          keep_checkpoint_max=1, integrated_save=False)
+        else:
+            ckptconfig = CheckpointConfig(save_checkpoint_steps=ds_train.get_dataset_size(), keep_checkpoint_max=5)
     else:
-        ckptconfig = CheckpointConfig(save_checkpoint_steps=ds_train.get_dataset_size(), keep_checkpoint_max=5)
+        ckptconfig = CheckpointConfig(save_checkpoint_steps=1, keep_checkpoint_max=1)
     ckpoint_cb = ModelCheckpoint(prefix='widedeep_train',
                                  directory=config.ckpt_path + '/ckpt_' + str(get_rank()) + '/',
                                  config=ckptconfig)
-    if cache_enable:
-        context.set_auto_parallel_context(strategy_ckpt_save_file=config.stra_ckpt)
     callback_list = [TimeMonitor(ds_train.get_dataset_size()), eval_callback, callback]
     if get_rank() == 0:
         callback_list.append(ckpoint_cb)

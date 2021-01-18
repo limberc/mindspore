@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -76,20 +76,16 @@ def _exec_datagraph(exec_dataset, dataset_size, phase='dataset', create_data_inf
 
 def _make_directory(path: str):
     """Make directory."""
-    real_path = None
     if path is None or not isinstance(path, str) or path.strip() == "":
         logger.error("The path(%r) is invalid type.", path)
-        raise TypeError("Input path is invaild type")
+        raise TypeError("Input path is invalid type")
 
-    # convert the relative paths
     path = os.path.realpath(path)
     logger.debug("The abs path is %r", path)
 
-    # check the path is exist and write permissions?
     if os.path.exists(path):
         real_path = path
     else:
-        # All exceptions need to be caught because create directory maybe have some limit(permissions)
         logger.debug("The directory(%s) doesn't exist, will create it", path)
         try:
             os.makedirs(path, exist_ok=True)
@@ -158,6 +154,7 @@ def _construct_input_tensors(dataset_types, dataset_shapes, device_number=1):
 def _check_to_numpy(plugin, tensor):
     """Check the tensor and return a numpy.ndarray."""
     np_value = tensor.asnumpy()
+    np_value = np_value.copy()
     if plugin == 'scalar':
         if np_value.size == 1:
             return np_value
@@ -205,7 +202,7 @@ def check_value_type(arg_name, arg_value, valid_types):
 
     if not is_valid:
         raise TypeError(f'For `{arg_name}` the type should be a valid type of {[t.__name__ for t in valid_types]}, '
-                        f'bug got {type(arg_value).__name__}.')
+                        f'but got {type(arg_value).__name__}.')
 
 
 def read_proto(file_name, proto_format="MINDIR"):

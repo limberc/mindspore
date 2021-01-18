@@ -49,6 +49,7 @@ std::shared_ptr<DatasetNode> VOCNode::Copy() {
 void VOCNode::Print(std::ostream &out) const { out << Name(); }
 
 Status VOCNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   Path dir(dataset_dir_);
 
   RETURN_IF_NOT_OK(ValidateDatasetDirParam("VOCNode", dataset_dir_));
@@ -84,7 +85,7 @@ Status VOCNode::ValidateParams() {
 }
 
 // Function to build VOCNode
-Status VOCNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
+Status VOCNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   auto schema = std::make_unique<DataSchema>();
   VOCOp::TaskType task_type_;
 

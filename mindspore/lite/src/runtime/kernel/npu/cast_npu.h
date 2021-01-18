@@ -19,18 +19,14 @@
 #include <vector>
 #include "src/runtime/kernel/npu/npu_kernel.h"
 #include "include/graph/op/all_ops.h"
-#include "nnacl/fp32/cast_fp32.h"
+
 namespace mindspore::kernel {
 class CastNPUKernel : public NPUKernel {
  public:
   CastNPUKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
                 const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
                 const mindspore::lite::PrimitiveC *primitive)
-      : NPUKernel(parameter, inputs, outputs, ctx, primitive) {
-    auto cast_parameter = reinterpret_cast<CastParameter *>(parameter);
-    dst_type_ = static_cast<TypeId>(cast_parameter->dst_type_);
-    src_type_ = static_cast<TypeId>(cast_parameter->src_type_);
-  }
+      : NPUKernel(parameter, inputs, outputs, ctx, primitive) {}
   ~CastNPUKernel() override;
 
   int IsSupport(const std::vector<lite::Tensor *> &inputs, const std::vector<lite::Tensor *> &outputs,
@@ -41,8 +37,6 @@ class CastNPUKernel : public NPUKernel {
 
  private:
   hiai::op::CastT *op_ = nullptr;
-  TypeId dst_type_;
-  TypeId src_type_;
 };
 }  // namespace mindspore::kernel
 #endif  // MINDSPORE_LITE_SRC_RUNTIME_KERNEL_NPU_CAST_NPU_H_

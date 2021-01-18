@@ -361,7 +361,7 @@ bool Debugger::ReadNodeDataRequired(const CNodePtr &kernel) {
   return false;
 }
 
-void Debugger::PostExecuteNode(const CNodePtr &kernel) {
+void Debugger::PostExecuteNode(const CNodePtr &kernel, bool last_kernel) {
   // access lock for public method
   std::lock_guard<std::mutex> a_lock(access_lock_);
   if (pipeline::ExecutorPy::GetDebugTerminate()) {
@@ -380,8 +380,9 @@ void Debugger::PostExecuteNode(const CNodePtr &kernel) {
         hit_empty_flag = false;
       }
     }
-    if (hit_empty_flag && run_level_ == "node" && (node_name_ == "" || node_name_ == cur_name_)) {
+    if (hit_empty_flag && run_level_ == "node" && (node_name_ == "" || node_name_ == cur_name_) && !last_kernel) {
       // if kernel is not watchpoint and is next_to or continue_to node, suspend
+      // No need to suspend if this is the last node in graph since PostExecute suspends at the end of graph
       CommandLoop();
     }
     return;
@@ -736,7 +737,7 @@ std::list<TensorProto> Debugger::LoadTensors(const ProtoVector<TensorProto> &ten
   std::vector<std::string> name;
   std::vector<std::string> ret_name;
   std::vector<char *> data_ptr;
-  std::vector<unsigned int> data_size;
+  std::vector<ssize_t> data_size;
   std::vector<TypePtr> dtype;
   std::vector<std::vector<int64_t>> shape;
 
@@ -749,7 +750,7 @@ std::list<TensorProto> Debugger::LoadTensors(const ProtoVector<TensorProto> &ten
   unsigned int result_index = 0;
 
   for (auto tensor : tensors) {
-    int size_iter = 0;
+    ssize_t size_iter = 0;
     if (result_index >= ret_name.size() || ret_name[result_index] != GetTensorFullName(tensor)) {
       TensorProto tensor_item;
       tensor_item.set_finished(true);
@@ -757,9 +758,9 @@ std::list<TensorProto> Debugger::LoadTensors(const ProtoVector<TensorProto> &ten
       tensor_list.push_back(tensor_item);
       continue;
     }
-    int tensor_size = data_size[result_index];
+    ssize_t tensor_size = data_size[result_index];
     while (size_iter < tensor_size) {
-      int chunk_size = CHUNK_SIZE;
+      ssize_t chunk_size = CHUNK_SIZE;
       TensorProto tensor_item;
       tensor_item.set_finished(false);
       if (tensor_size - size_iter <= CHUNK_SIZE) {
@@ -1178,11 +1179,8 @@ void Debugger::LoadGraphOutputs() {
       }
     }
     for (size_t j = 0; j < output_size; ++j) {
-      auto kernel_info = static_cast<device::KernelInfo *>(node->kernel_info());
-      MS_EXCEPTION_IF_NULL(kernel_info);
-      auto addr_test = kernel_info->GetOutputAddr(j);
-      if (addr_test == nullptr) {
-        MS_LOG(INFO) << "Cannot find output addr for slot " << j << " for " << kernel_name;
+      if (!AnfAlgo::OutputAddrExist(node, j)) {
+        MS_LOG(INFO) << "Cannot find output addr for slot " << j << " for " << node->fullname_with_scope();
         continue;
       }
       auto addr = AnfAlgo::GetOutputAddr(node, j);

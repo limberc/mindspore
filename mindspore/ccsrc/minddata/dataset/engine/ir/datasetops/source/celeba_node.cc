@@ -50,6 +50,7 @@ void CelebANode::Print(std::ostream &out) const {
 }
 
 Status CelebANode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   RETURN_IF_NOT_OK(ValidateDatasetDirParam("CelebANode", dataset_dir_));
 
   RETURN_IF_NOT_OK(ValidateDatasetSampler("CelebANode", sampler_));
@@ -60,7 +61,7 @@ Status CelebANode::ValidateParams() {
 }
 
 // Function to build CelebANode
-Status CelebANode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
+Status CelebANode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   std::unique_ptr<DataSchema> schema = std::make_unique<DataSchema>();
   RETURN_IF_NOT_OK(schema->AddColumn(ColDescriptor("image", DataType(DataType::DE_UINT8), TensorImpl::kFlexible, 1)));
   // label is like this:0 1 0 0 1......

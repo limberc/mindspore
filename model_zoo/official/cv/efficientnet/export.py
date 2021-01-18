@@ -32,10 +32,12 @@ parser.add_argument("--device_target", type=str, choices=["Ascend", "GPU", "CPU"
                     help="device target")
 args = parser.parse_args()
 
-context.set_context(mode=context.GRAPH_MODE, device_target=args.device_target, device_id=args.device_id)
+context.set_context(mode=context.GRAPH_MODE, device_target=args.device_target)
+if args.device_target == "Ascend":
+    context.set_context(device_id=args.device_id)
 
 if __name__ == "__main__":
-    if args.platform != "GPU":
+    if args.device_target != "GPU":
         raise ValueError("Only supported GPU now.")
 
     net = efficientnet_b0(num_classes=cfg.num_classes,

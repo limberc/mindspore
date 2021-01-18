@@ -45,39 +45,41 @@ class SingleSwitchPass {
   STATUS Init();
   size_t InitThisGraphIndex();
   STATUS DoubleSwitchOutput();
-  STATUS MoveMaxIterationToCond();
   STATUS UpdateSwitchUser();
   STATUS ConcatCondSubgraphInputAndOutput();
   STATUS ConcatBodySubgraphInputAndOutput();
-  STATUS ConvertSwitchToSelect();
   bool IsLoop();
   STATUS InsertMerge();
+
+  // function for if
+  STATUS InsertPartialAndMergeAfterSwitch();
+  int GetSubgraphInputTensorIndex(const std::unique_ptr<SubGraphT> &subgraph, const std::unique_ptr<TensorT> &tensor);
+  int GetSubgraphOutputTensorIndex(const std::unique_ptr<SubGraphT> &subgraph, CNodeT *node);
   STATUS UpdateSubgraphInput(const size_t &subgraph_index, schema::CNodeT *partial_node,
                              const std::vector<schema::CNodeT *> &subgraph_nodes);
   STATUS UpdateSubgraphOutput(const size_t &subgraph_index, schema::CNodeT *partial_node,
                               const std::vector<schema::CNodeT *> &subgraph_nodes);
-  std::unique_ptr<schema::TensorT> NewTensor(const std::unique_ptr<schema::TensorT> &in_tensor);
-  void RemoveUselessNode(schema::CNodeT *partial_node, schema::MetaGraphT *graph);
+  std::unique_ptr<schema::TensorT> NewTensor(const std::unique_ptr<schema::TensorT> &in_tensor, bool with_data = false);
+  void IsolateUselessNode(schema::CNodeT *partial_node, schema::MetaGraphT *graph);
+  void UpdateSwitchOutputIndices(uint32_t *idx);
+  STATUS BodyGraphVariableInput(std::vector<size_t> *variable_input);
 
-  const size_t kSwitchCondIndex = 0;
-  const size_t kSwitchBodyIndex = 1;
+  const size_t kSwitchFirstIndex = 0;
+  const size_t kSwitchSecondIndex = 1;
   const size_t kSwitchMinInputSize = 2;
 
   schema::MetaGraphT *graph_ = nullptr;
   schema::CNodeT *switch_node_ = nullptr;
-  schema::CNodeT *cond_partial_node_ = nullptr;
-  schema::CNodeT *body_partial_node_ = nullptr;
+  schema::CNodeT *first_partial_node_ = nullptr;
+  schema::CNodeT *second_partial_node_ = nullptr;
   schema::CNodeT *body_to_cond_partial_node_ = nullptr;
   std::vector<schema::CNodeT *> this_graph_nodes_;
-  std::vector<schema::CNodeT *> body_graph_nodes_;
-  std::vector<schema::CNodeT *> cond_graph_nodes_;
-  std::vector<schema::CNodeT *> switch_users_;
+  std::vector<schema::CNodeT *> second_graph_nodes_;
+  std::vector<schema::CNodeT *> first_graph_nodes_;
   size_t switch_node_index_ = -1;
-  size_t cond_node_index_ = -1;
-  size_t body_node_index_ = -1;
   int32_t this_subgraph_index_ = -1;
-  int32_t cond_subgraph_index_ = -1;
-  int32_t body_subgraph_index_ = -1;
+  int32_t first_subgraph_index_ = -1;
+  int32_t second_subgraph_index_ = -1;
   std::vector<uint32_t> origin_switch_output_tensor_indices_;
 };
 }  // namespace lite

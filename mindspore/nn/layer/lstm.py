@@ -99,7 +99,7 @@ class LSTM(Cell):
           Data type of `hx` must be the same as `input`.
 
     Outputs:
-        Tuple, a tuple constains (`output`, (`h_n`, `c_n`)).
+        Tuple, a tuple contains (`output`, (`h_n`, `c_n`)).
 
         - **output** (Tensor) - Tensor of shape (seq_len, batch_size, num_directions * `hidden_size`).
         - **hx_n** (tuple) - A tuple of two Tensor (h_n, c_n) both of shape
@@ -154,8 +154,12 @@ class LSTM(Cell):
             self.concat_2dim = P.Concat(axis=2)
             self.cast = P.Cast()
             self.shape = P.Shape()
-            if dropout != 0:
-                self.dropout_op = nn.Dropout(float(dropout))
+            if dropout < 0 or dropout > 1:
+                raise ValueError("For LSTM, dropout must be a number in range [0, 1], but got {}".format(dropout))
+            if dropout == 1:
+                self.dropout_op = P.ZerosLike()
+            else:
+                self.dropout_op = nn.Dropout(float(1 - dropout))
             b0 = np.zeros(gate_size, dtype=np.float16)
             self.w_list = []
             self.b_list = []
@@ -339,6 +343,8 @@ class LSTMCell(Cell):
         >>> c = Tensor(np.ones([1, 3, 12]).astype(np.float32))
         >>> w = Tensor(np.ones([1152, 1, 1]).astype(np.float32))
         >>> output, h, c, _, _ = net(input, h, c, w)
+        >>> print(output.shape)
+        (3, 5, 12)
     """
 
     def __init__(self,

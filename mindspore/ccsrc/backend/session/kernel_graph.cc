@@ -1031,32 +1031,42 @@ std::vector<CNodePtr> KernelGraph::FindNodeByPrimitive(const std::vector<Primiti
 }
 
 void KernelGraph::PrintGraphExecuteOrder() const {
-  MS_LOG(INFO) << "Graph:" << graph_id_ << "execution order";
+  MS_LOG(INFO) << "Graph " << graph_id_ << " execution order:";
   for (size_t i = 0; i < execution_order_.size(); i++) {
     CNodePtr cur_cnode_ptr = execution_order_[i];
     MS_EXCEPTION_IF_NULL(cur_cnode_ptr);
+
     std::string event_str;
-    std::string label_str;
     if (AnfAlgo::HasNodeAttr(kAttrEventId, cur_cnode_ptr)) {
-      event_str = ", event_id[" + std::to_string(AnfAlgo::GetNodeAttr<uint32_t>(cur_cnode_ptr, kAttrEventId)) + "]";
+      event_str = ", event id[" + std::to_string(AnfAlgo::GetNodeAttr<uint32_t>(cur_cnode_ptr, kAttrEventId)) + "]";
     }
 
+    std::string label_str;
     if (AnfAlgo::HasNodeAttr(kAttrLabelIndex, cur_cnode_ptr)) {
-      label_str = ", label_id[" + std::to_string(AnfAlgo::GetNodeAttr<uint32_t>(cur_cnode_ptr, kAttrLabelIndex)) + "]";
+      label_str = ", label id[" + std::to_string(AnfAlgo::GetNodeAttr<uint32_t>(cur_cnode_ptr, kAttrLabelIndex)) + "]";
     }
 
     if (AnfAlgo::HasNodeAttr(kAttrLabelSwitchList, cur_cnode_ptr)) {
       auto label_list = AnfAlgo::GetNodeAttr<std::vector<uint32_t>>(cur_cnode_ptr, kAttrLabelSwitchList);
-      label_str = ", label_id[";
+      label_str = ", label id[";
       for (size_t j = 0; j < label_list.size(); ++j) {
         label_str += std::to_string(label_list[j]) + (j + 1 < label_list.size() ? ", " : "]");
+      }
+    }
+
+    std::string active_stream_str;
+    if (AnfAlgo::HasNodeAttr(kAttrActiveStreamList, cur_cnode_ptr)) {
+      auto stream_list = AnfAlgo::GetNodeAttr<std::vector<uint32_t>>(cur_cnode_ptr, kAttrActiveStreamList);
+      active_stream_str = ", active stream id[";
+      for (size_t j = 0; j < stream_list.size(); ++j) {
+        active_stream_str += std::to_string(stream_list[j]) + (j + 1 < stream_list.size() ? ", " : "]");
       }
     }
 
     MS_LOG(INFO) << "Index[" << i << "], node name[" << cur_cnode_ptr->fullname_with_scope() << "], logic id["
                  << AnfAlgo::GetStreamDistinctionLabel(cur_cnode_ptr.get()) << "], stream id["
                  << AnfAlgo::GetStreamId(cur_cnode_ptr) << "], node info[" << cur_cnode_ptr->DebugString() << "]"
-                 << event_str << label_str;
+                 << event_str << label_str << active_stream_str;
   }
 }
 
@@ -1211,6 +1221,33 @@ void KernelGraph::RemoveNodeFromGraph(const AnfNodePtr &node) {
       (void)graph_value_nodes_.erase(node->cast<ValueNodePtr>());
     }
   }
+}
+
+ParameterPtr KernelGraph::AddExtraParamAndTensor(std::string param_name, int32_t value) {
+  ParameterPtr param;
+  ShapeVector shp = {1};
+  tensor::TensorPtr tensor_ptr = std::make_shared<tensor::Tensor>(kInt32->type_id(), shp);
+  MS_EXCEPTION_IF_NULL(tensor_ptr);
+  mindspore::abstract::AbstractBasePtr paremeter_abstract_ptr = tensor_ptr->ToAbstract();
+  ParameterPtr new_param = std::make_shared<Parameter>(shared_from_this()->cast<KernelGraphPtr>());
+  MS_EXCEPTION_IF_NULL(new_param);
+  new_param->set_name(param_name);
+  new_param->set_abstract(paremeter_abstract_ptr);
+  param = NewParameter(new_param);
+  // ensure alloc mem for this param
+  std::vector<AnfNodePtr> *mute_inputs = MutableInputs();
+  MS_EXCEPTION_IF_NULL(mute_inputs);
+  mute_inputs->push_back(param);
+
+  tensor::TensorPtr data_tensor_ptr = std::make_shared<tensor::Tensor>(kInt32->type_id(), shp);
+  MS_EXCEPTION_IF_NULL(data_tensor_ptr);
+  int32_t *val = nullptr;
+  val = static_cast<int32_t *>(data_tensor_ptr->data_c());
+  *val = value;
+
+  extra_param_tensor_.push_back(std::make_pair(param, data_tensor_ptr));
+  MS_LOG(INFO) << "Create new param: " << param->DebugString();
+  return param;
 }
 
 void KernelGraph::UpdateGraphDynamicAttr() {

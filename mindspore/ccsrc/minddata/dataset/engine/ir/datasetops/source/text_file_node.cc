@@ -55,6 +55,7 @@ void TextFileNode::Print(std::ostream &out) const {
 }
 
 Status TextFileNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   RETURN_IF_NOT_OK(ValidateDatasetFilesParam("TextFileNode", dataset_files_));
 
   if (num_samples_ < 0) {
@@ -69,7 +70,7 @@ Status TextFileNode::ValidateParams() {
 }
 
 // Function to build TextFileNode
-Status TextFileNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
+Status TextFileNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   bool shuffle_files = (shuffle_ == ShuffleMode::kGlobal || shuffle_ == ShuffleMode::kFiles);
 
   // TextFileOp by itself is a non-mappable dataset that does not support sampling.

@@ -22,7 +22,7 @@ export BUILD_PATH="${BASEPATH}/build/"
 usage()
 {
   echo "Usage:"
-  echo "bash build.sh [-d] [-r] [-v] [-c on|off] [-t on|off] [-g on|off] [-h] [-b ge] [-m infer|train] \\"
+  echo "bash build.sh [-d] [-r] [-v] [-c on|off] [-t ut|st] [-g on|off] [-h] [-b ge] [-m infer|train] \\"
   echo "              [-a on|off] [-p on|off] [-i] [-L] [-R] [-D on|off] [-j[n]] [-e gpu|ascend|cpu|npu] \\"
   echo "              [-P on|off] [-z [on|off]] [-M on|off] [-V 9.2|10.1|310|910] [-I arm64|arm32|x86_64] [-K] \\"
   echo "              [-B on|off] [-E] [-l on|off] [-n full|lite|off] [-T on|off] \\"
@@ -33,7 +33,7 @@ usage()
   echo "    -r Release mode, default mode"
   echo "    -v Display build command"
   echo "    -c Enable code coverage, default off"
-  echo "    -t Run testcases, default on"
+  echo "    -t Run testcases, default off"
   echo "    -g Use glog to output log, default on"
   echo "    -h Print usage"
   echo "    -b Select other backend, available: \\"
@@ -86,6 +86,7 @@ checkopts()
   VERBOSE=""
   ENABLE_COVERAGE="off"
   RUN_TESTCASES="off"
+  RUN_CPP_ST_TESTS="off"
   ENABLE_BACKEND=""
   TRAIN_MODE="INFER"
   ENABLE_ASAN="off"
@@ -152,8 +153,17 @@ checkopts()
         ENABLE_COVERAGE="$OPTARG"
         ;;
       t)
-        check_on_off $OPTARG t
-        RUN_TESTCASES="$OPTARG"
+        if [[ "X$OPTARG" == "Xon" || "X$OPTARG" == "Xut" ]]; then
+          RUN_TESTCASES="on"
+        elif [[ "X$OPTARG" == "Xoff" ]]; then
+          RUN_TESTCASES="off"
+        elif [[ "X$OPTARG" == "Xst" ]]; then
+          RUN_CPP_ST_TESTS="on"
+        else
+          echo "Invalid value ${OPTARG} for option -t"
+          usage
+          exit 1
+        fi
         ;;
       g)
         check_on_off $OPTARG g
@@ -381,9 +391,6 @@ checkopts "$@"
 echo "---------------- MindSpore: build start ----------------"
 mkdir -pv "${BUILD_PATH}/package/mindspore/lib"
 git submodule update --init graphengine
-cd "${BASEPATH}/graphengine"
-git submodule update --init metadef
-cd "${BASEPATH}"
 if [[ "X$ENABLE_AKG" = "Xon" ]] && [[ "X$ENABLE_D" = "Xon" || "X$ENABLE_GPU" = "Xon" ]]; then
     git submodule update --init --recursive akg
 fi
@@ -408,6 +415,9 @@ build_mindspore()
     fi
     if [[ "X$RUN_TESTCASES" = "Xon" ]]; then
       CMAKE_ARGS="${CMAKE_ARGS} -DENABLE_TESTCASES=ON"
+    fi
+    if [[ "X$RUN_CPP_ST_TESTS" = "Xon" ]]; then
+      CMAKE_ARGS="${CMAKE_ARGS} -DENABLE_CPP_ST=ON"
     fi
     if [[ -n "$ENABLE_BACKEND" ]]; then
       CMAKE_ARGS="${CMAKE_ARGS} -DENABLE_${ENABLE_BACKEND}=ON"
@@ -492,68 +502,16 @@ checkddk() {
     fi
 }
 
-gene_clhpp() {
-    CL_SRC_DIR="${BASEPATH}/mindspore/lite/src/runtime/kernel/opencl/cl"
-    if [ ! -d "${CL_SRC_DIR}" ]; then
-      return
-    fi
-    cd ${CL_SRC_DIR}/
-    rm -rf *.inc
-    echo "$(cd "$(dirname $0)"; pwd)"
-    for file_path in "${CL_SRC_DIR}"/*
-    do
-        file="$(basename ${file_path})"
-        inc_file=$(echo ${CL_SRC_DIR}/${file} | sed 's/$/.inc/')
-        sed 's/\\/\\\\/g;s/\"/\\\"/g;s/^/\"/;s/$/\\n\" \\/' ${CL_SRC_DIR}/${file} > ${inc_file}
-        kernel_name=$(echo ${file} | sed s'/.\{3\}$//')
-        sed -i "1i\static const char *${kernel_name}_source =\"\\n\" \\" ${inc_file}
-        sed -i '$a\;' ${inc_file}
-    done
-}
-
-gene_ocl_program() {
-    OCL_SRC_DIR="${BASEPATH}/mindspore/lite/src/runtime/kernel/opencl/cl"
-    SPIRV_DIR=build/spirv
-    [ -n "${SPIRV_DIR}" ] && rm -rf ${SPIRV_DIR}
-    mkdir -pv ${SPIRV_DIR}
-    if [ ! -d "${OCL_SRC_DIR}" ]; then
-      return
-    fi
-    for file_path in "${OCL_SRC_DIR}"/*
-    do
-      ocl_file="$(basename ${file_path})"
-      if [ "${ocl_file##*.}" != "cl" ]; then
-        continue
-      fi
-      clang -Xclang -finclude-default-header -cl-std=CL2.0 --target=spir64-unknown-unknown -emit-llvm \
-            -c -O0 -o ${SPIRV_DIR}/${ocl_file%.*}.bc ${OCL_SRC_DIR}/${ocl_file}
-    done
-
-    bcs=$(ls ${SPIRV_DIR}/*.bc)
-    llvm-link ${bcs} -o ${SPIRV_DIR}/program.bc
-    llvm-spirv -o ${SPIRV_DIR}/program.spv ${SPIRV_DIR}/program.bc
-
-    CL_PROGRAM_PATH="${BASEPATH}/mindspore/lite/src/runtime/kernel/opencl/cl/program.inc"
-    echo "#include <vector>" > ${CL_PROGRAM_PATH}
-    echo "std::vector<unsigned char> g_program_binary = {" >> ${CL_PROGRAM_PATH}
-    #hexdump -v -e '16/1 "0x%02x, " "\n"' ${SPIRV_DIR}/program.spv >> ${CL_PROGRAM_PATH}
-    hexdump -v -e '1/1 "0x%02x, "' ${SPIRV_DIR}/program.spv >> ${CL_PROGRAM_PATH}
-    echo "};" >> ${CL_PROGRAM_PATH}
-    echo "Compile SPIRV done"
-}
-
-get_opencl() {
-    cd ${BASEPATH}
-    git submodule update --init third_party/OpenCL-Headers
-    git submodule update --init third_party/OpenCL-CLHPP
-}
-
-
 get_version() {
     VERSION_MAJOR=$(grep "const int ms_version_major =" ${BASEPATH}/mindspore/lite/include/version.h | tr -dc "[0-9]")
     VERSION_MINOR=$(grep "const int ms_version_minor =" ${BASEPATH}/mindspore/lite/include/version.h | tr -dc "[0-9]")
     VERSION_REVISION=$(grep "const int ms_version_revision =" ${BASEPATH}/mindspore/lite/include/version.h | tr -dc "[0-9]")
     VERSION_STR=${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_REVISION}
+}
+
+write_commit_file() {
+    COMMIT_STR=$(git log -1 | grep commit)
+    echo ${COMMIT_STR} > "${BASEPATH}/mindspore/lite/build/.commit_id"
 }
 
 build_lite()
@@ -562,16 +520,24 @@ build_lite()
     echo "============ Start building MindSpore Lite ${VERSION_STR} ============"
 
     LITE_ENABLE_GPU=${ENABLE_GPU}
-    if [[ "${DEVICE}" == "" && "${LITE_PLATFORM}" == "arm64" ]]; then
+    LITE_ENABLE_NPU=${ENABLE_NPU}
+    if [[ "${DEVICE}" == ""  &&  "${LITE_PLATFORM}" == "arm64" ]]; then
       LITE_ENABLE_GPU="on"
+      LITE_ENABLE_NPU="on"
     fi
 
-    if [ "${ENABLE_GPU}" == "on" ] && [ "${LITE_PLATFORM}" == "arm64" ] || [ $1 == "arm64" ]; then
+    if [[ $1 == "arm64" && "X$DEVICE" != "Xcpu" ]]; then
+      LITE_ENABLE_GPU="on"
       echo "start get opencl"
-      get_opencl
     fi
-    if [ "${ENABLE_NPU}" == "on" ]; then
-      checkddk
+
+    if [ "${LITE_ENABLE_NPU}" == "on" ]; then
+      if [ "${LITE_PLATFORM}" == "arm64" ]; then
+        checkddk
+      else
+        echo "NPU only support platform arm64."
+        exit 1
+      fi
     fi
 
     cd "${BASEPATH}/mindspore/lite"
@@ -580,6 +546,7 @@ build_lite()
     fi
     mkdir -pv build
     cd build
+    write_commit_file
     BUILD_TYPE="Release"
     if [[ "${DEBUG_MODE}" == "on" ]]; then
       BUILD_TYPE="Debug"
@@ -590,9 +557,9 @@ build_lite()
         cmake -DCMAKE_TOOLCHAIN_FILE="${ANDROID_NDK}/build/cmake/android.toolchain.cmake" -DANDROID_NATIVE_API_LEVEL="19"      \
               -DANDROID_NDK="${ANDROID_NDK}" -DANDROID_ABI="arm64-v8a" -DANDROID_TOOLCHAIN_NAME="aarch64-linux-android-clang"  \
               -DANDROID_STL=${ANDROID_STL} -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DSUPPORT_TRAIN=${SUPPORT_TRAIN}                     \
-              -DPLATFORM_ARM64=on -DENABLE_NEON=on -DENABLE_FP16="off"      \
+              -DPLATFORM_ARM64=on -DENABLE_NEON=on -DENABLE_FP16="on"      \
               -DENABLE_TOOLS=${ENABLE_TOOLS} -DENABLE_CONVERTER=${ENABLE_CONVERTER} -DBUILD_TESTCASES=${RUN_TESTCASES} \
-              -DSUPPORT_GPU=${LITE_ENABLE_GPU} -DSUPPORT_NPU=${ENABLE_NPU} \
+              -DSUPPORT_GPU=${LITE_ENABLE_GPU} -DSUPPORT_NPU=${LITE_ENABLE_NPU} -DENABLE_V0=on \
               -DOFFLINE_COMPILE=${OPENCL_OFFLINE_COMPILE} -DBUILD_MINDDATA=${COMPILE_MINDDATA_LITE} \
               -DCMAKE_INSTALL_PREFIX=${BASEPATH}/output/tmp -DMS_VERSION_MAJOR=${VERSION_MAJOR}                           \
               -DMS_VERSION_MINOR=${VERSION_MINOR} -DMS_VERSION_REVISION=${VERSION_REVISION} -DENABLE_VERBOSE=${ENABLE_VERBOSE} \
@@ -604,7 +571,7 @@ build_lite()
               -DANDROID_STL=${ANDROID_STL}  -DCMAKE_BUILD_TYPE=${BUILD_TYPE}                                                      \
               -DPLATFORM_ARM32=on -DENABLE_NEON=on -DSUPPORT_TRAIN=${SUPPORT_TRAIN}  \
               -DENABLE_TOOLS=${ENABLE_TOOLS} -DENABLE_CONVERTER=${ENABLE_CONVERTER} -DBUILD_TESTCASES=${RUN_TESTCASES} \
-              -DSUPPORT_GPU=${ENABLE_GPU} -DSUPPORT_NPU=${ENABLE_NPU} \
+              -DSUPPORT_GPU=${LITE_ENABLE_GPU} -DSUPPORT_NPU=${ENABLE_NPU} -DENABLE_V0=on \
               -DOFFLINE_COMPILE=${OPENCL_OFFLINE_COMPILE} -DBUILD_MINDDATA=${COMPILE_MINDDATA_LITE} \
               -DCMAKE_INSTALL_PREFIX=${BASEPATH}/output/tmp -DMS_VERSION_MAJOR=${VERSION_MAJOR}                           \
               -DMS_VERSION_MINOR=${VERSION_MINOR} -DMS_VERSION_REVISION=${VERSION_REVISION} -DENABLE_VERBOSE=${ENABLE_VERBOSE} \
@@ -612,8 +579,8 @@ build_lite()
     else
         cmake -DPLATFORM_ARM64=off -DSUPPORT_TRAIN=${SUPPORT_TRAIN}   \
         -DENABLE_TOOLS=${ENABLE_TOOLS} -DENABLE_CONVERTER=${ENABLE_CONVERTER} -DBUILD_TESTCASES=${RUN_TESTCASES} \
-        -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DSUPPORT_GPU=${ENABLE_GPU} -DSUPPORT_NPU=${ENABLE_NPU} \
-        -DBUILD_MINDDATA=${COMPILE_MINDDATA_LITE} \
+        -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DSUPPORT_GPU=${LITE_ENABLE_GPU} -DSUPPORT_NPU=${ENABLE_NPU} \
+        -DBUILD_MINDDATA=${COMPILE_MINDDATA_LITE} -DENABLE_V0=on \
         -DOFFLINE_COMPILE=${OPENCL_OFFLINE_COMPILE} -DCMAKE_INSTALL_PREFIX=${BASEPATH}/output/tmp  \
         -DMS_VERSION_MAJOR=${VERSION_MAJOR} -DMS_VERSION_MINOR=${VERSION_MINOR} -DMS_VERSION_REVISION=${VERSION_REVISION} \
         -DENABLE_VERBOSE=${ENABLE_VERBOSE} -DX86_64_SIMD=${X86_64_SIMD} "${BASEPATH}/mindspore/lite"

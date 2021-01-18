@@ -22,6 +22,8 @@
 #include <vector>
 
 #include "minddata/dataset/engine/ir/datasetops/dataset_node.h"
+#include "minddata/dataset/engine/ir/datasetops/epoch_ctrl_node.h"
+#include "minddata/dataset/engine/ir/datasetops/repeat_node.h"
 #include "minddata/dataset/util/status.h"
 
 namespace mindspore {
@@ -55,7 +57,7 @@ class GeneratorNode : public MappableSourceNode {
   /// \brief a base class override function to create the required runtime dataset op objects for this class
   /// \param node_ops - A vector containing shared pointer to the Dataset Ops that this object will create
   /// \return Status Status::OK() if build successfully
-  Status Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) override;
+  Status Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) override;
 
   /// \brief Parameters validation
   /// \return Status Status::OK() if all the parameters are valid
@@ -72,11 +74,33 @@ class GeneratorNode : public MappableSourceNode {
 
   bool IsSizeDefined() override { return false; }
 
+  /// \brief Record the vector of Repeat/EpochCtrl nodes that are ancestors of this node
+  /// \param[in] the ancestor node
+  /// \return Status of the function
+  Status AddResetAncestor(const std::shared_ptr<RepeatNode> &src) {
+    CHECK_FAIL_RETURN_UNEXPECTED(reset_ancestor_ == nullptr, "Internal error: Overwriting an existing value");
+    reset_ancestor_ = src;
+    return Status::OK();
+  }
+
  private:
   py::function generator_function_;
   std::vector<std::string> column_names_;
   std::vector<DataType> column_types_;
   std::shared_ptr<SchemaObj> schema_;
+  std::shared_ptr<RepeatNode> reset_ancestor_;  // updated its immediate Repeat/EpochCtrl ancestor in GeneratorNodePass
+
+  /// \brief Base-class override for accepting IRNodePass visitor
+  /// \param[in] p The node to visit
+  /// \param[out] modified Indicator if the node was modified
+  /// \return Status of the node visit
+  Status Accept(IRNodePass *p, bool *const modified) override;
+
+  /// \brief Base-class override for accepting IRNodePass visitor
+  /// \param[in] p The node to visit
+  /// \param[out] modified Indicator if the node was modified
+  /// \return Status of the node visit
+  Status AcceptAfter(IRNodePass *p, bool *const modified) override;
 };
 
 }  // namespace dataset

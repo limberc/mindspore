@@ -28,8 +28,8 @@
 namespace mindspore::lite {
 class Scheduler {
  public:
-  Scheduler(const InnerContext *ctx, Model *src_model, std::vector<Tensor *> src_tensors)
-      : context_(ctx), src_model_(src_model), src_tensors_(std::move(src_tensors)) {}
+  Scheduler(const InnerContext *ctx, Model *src_model, std::vector<Tensor *> *src_tensors)
+      : context_(ctx), src_model_(src_model), src_tensors_(src_tensors) {}
   ~Scheduler() = default;
 
   int Schedule(std::vector<kernel::LiteKernel *> *dst_kernels);
@@ -53,7 +53,8 @@ class Scheduler {
   // schedule a node to a kernel
   kernel::LiteKernel *ScheduleNodeToKernel(const lite::Model::Node *src_node);
   // schedule a Model::SubGraph into a vector of kernel and subgraph_kernel
-  int ScheduleSubGraphToKernels(size_t subgraph_index, std::vector<kernel::LiteKernel *> *dst_kernels);
+  int ScheduleSubGraphToKernels(size_t subgraph_index, std::vector<kernel::LiteKernel *> *dst_kernels,
+                                std::vector<lite::Tensor *> *in_tensors, std::vector<lite::Tensor *> *out_tensors);
 
   // find in_kernels_ and out_kernels of kernel, sub_graph and nodes_ in sub_graph
   static void FindAllInoutKernels(const std::vector<kernel::LiteKernel *> &kernels);
@@ -63,6 +64,8 @@ class Scheduler {
 
   // create subgraph_kernel from a vector of kernel
   kernel::SubGraphKernel *CreateSubGraphKernel(const std::vector<kernel::LiteKernel *> &kernels,
+                                               const std::vector<lite::Tensor *> *in_tensors,
+                                               const std::vector<lite::Tensor *> *out_tensors,
                                                kernel::SubGraphType type);
 
   bool MergeOpIsReady(const kernel::LiteKernel *kernel, std::map<const kernel::LiteKernel *, bool> is_kernel_finish);
@@ -77,10 +80,12 @@ class Scheduler {
 
   static kernel::SubGraphType GetKernelSubGraphType(const kernel::LiteKernel *kernel);
 
+  int RunPass(std::vector<kernel::LiteKernel *> *dst_kernels);
+
  protected:
   const InnerContext *context_ = nullptr;
   Model *src_model_ = nullptr;
-  std::vector<Tensor *> src_tensors_;
+  std::vector<Tensor *> *src_tensors_;
   std::vector<size_t> graph_output_node_indexes_;
 };
 }  // namespace mindspore::lite

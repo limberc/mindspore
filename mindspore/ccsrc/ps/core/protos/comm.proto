@@ -26,6 +26,7 @@ enum NodeCommand {
   SEND_DATA = 3;
   FETCH_SERVER = 4;
   FINISH = 5;
+  COLLECTIVE_SEND_DATA = 6;
 }
 
 enum NodeRole {
@@ -94,5 +95,6 @@ message FinishMessage {
 message CommMessage {
   MessageMeta pb_meta = 1;
   bytes data = 2;
+  // User-defined commands
+  bytes user_cmd = 3;
 }
-

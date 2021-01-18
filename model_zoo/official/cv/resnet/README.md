@@ -81,8 +81,8 @@ For FP16 operators, if the input data type is FP32, the backend of MindSpore wil
 
 # [Environment Requirements](#contents)
 
-- Hardware（Ascend/GPU）
-    - Prepare hardware environment with Ascend or GPU processor. If you want to try Ascend  , please send the [application form](https://obs-9be7.obs.cn-east-2.myhuaweicloud.com/file/other/Ascend%20Model%20Zoo%E4%BD%93%E9%AA%8C%E8%B5%84%E6%BA%90%E7%94%B3%E8%AF%B7%E8%A1%A8.docx) to ascend@huawei.com. Once approved, you can get the resources.
+- Hardware（Ascend/GPU/CPU）
+    - Prepare hardware environment with Ascend, GPU or CPU processor. If you want to try Ascend  , please send the [application form](https://obs-9be7.obs.cn-east-2.myhuaweicloud.com/file/other/Ascend%20Model%20Zoo%E4%BD%93%E9%AA%8C%E8%B5%84%E6%BA%90%E7%94%B3%E8%AF%B7%E8%A1%A8.docx) to ascend@huawei.com. Once approved, you can get the resources.
 - Framework
     - [MindSpore](https://www.mindspore.cn/install/en)
 - For more information, please check the resources below：
@@ -121,6 +121,16 @@ sh run_eval_gpu.sh [resnet50|resnet101] [cifar10|imagenet2012] [DATASET_PATH] [C
 
 # gpu benchmark example
 sh run_gpu_resnet_benchmark.sh [DATASET_PATH] [BATCH_SIZE](optional) [DTYPE](optional) [DEVICE_NUM](optional) [SAVE_CKPT](optional) [SAVE_PATH](optional)
+```
+
+- Running on CPU
+
+```bash
+# standalone training example
+python train.py --net=[resnet50|resnet101] --dataset=[cifar10|imagenet2012] --device_target=CPU --dataset_path=[DATASET_PATH] --pre_trained=[CHECKPOINT_PATH](optional)
+
+# infer example
+python eval.py --net=[resnet50|resnet101] --dataset=[cifar10|imagenet2012] --dataset_path=[DATASET_PATH] --checkpoint_path=[CHECKPOINT_PATH] --device_target=CPU
 ```
 
 # [Script Description](#contents)
@@ -365,11 +375,11 @@ epoch: 5 step: 5004, loss is 3.3501816
 
 ```bash
 # ========START RESNET50 GPU BENCHMARK========
-Epoch time: 12416.098 ms, fps: 412 img/sec. epoch: 1 step: 20, loss is 6.940182
-Epoch time: 3472.037 ms, fps: 1474 img/sec. epoch: 2 step: 20, loss is 7.078993
-Epoch time: 3469.523 ms, fps: 1475 img/sec. epoch: 3 step: 20, loss is 7.559594
-Epoch time: 3460.311 ms, fps: 1479 img/sec. epoch: 4 step: 20, loss is 6.920937
-Epoch time: 3460.543 ms, fps: 1479 img/sec. epoch: 5 step: 20, loss is 6.814013
+epoch: [0/1] step: [20/5004], loss is 6.940182 Epoch time: 12416.098 ms, fps: 412 img/sec.
+epoch: [0/1] step: [40/5004], loss is 7.078993Epoch time: 3438.972 ms, fps: 1488 img/sec.
+epoch: [0/1] step: [60/5004], loss is 7.559594Epoch time: 3431.516 ms, fps: 1492 img/sec.
+epoch: [0/1] step: [80/5004], loss is 6.920937Epoch time: 3435.777 ms, fps: 1490 img/sec.
+epoch: [0/1] step: [100/5004], loss is 6.814013Epoch time: 3437.154 ms, fps: 1489 img/sec.
 ...
 ```
 

@@ -17,8 +17,6 @@
 #ifndef MINDSPORE_LITE_NNACL_FP32_COMMON_FUNC_H_
 #define MINDSPORE_LITE_NNACL_FP32_COMMON_FUNC_H_
 
-#include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 #include "nnacl/op_base.h"
 #include "nnacl/conv_parameter.h"
@@ -34,10 +32,6 @@ void PostConvFuncFp32C4(const float *c4_out_ptr, float *out_ptr, const float *bi
 
 void WinogradTransLeft(const float *S, const float *B, float *M, size_t w, size_t h, size_t k, size_t length);
 void WinogradTransRight(const float *S, const float *B, float *M, size_t w, size_t h, size_t k, size_t length);
-
-float ShortToFloat32(uint16_t src_value);
-
-uint16_t Float32ToShort(float src_value);
 
 #if defined(ENABLE_ARM) || defined(ENABLE_SSE)
 void ConvDwFp32Center(float *dst, const float *src, const float *weight, const float *bias, size_t height, size_t width,

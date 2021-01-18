@@ -71,13 +71,13 @@ set(MS_CCSRC_PATH ${CMAKE_SOURCE_DIR}/mindspore/ccsrc)
 set(MS_CCSRC_BUILD_PATH ${BUILD_PATH}/mindspore/mindspore/ccsrc)
 
 if (ENABLE_D OR ENABLE_ACL OR ENABLE_TESTCASES)
-    include(${CMAKE_SOURCE_DIR}/cmake/dependency_graphenginev2.cmake)
+    include(${CMAKE_SOURCE_DIR}/cmake/dependency_graphengine.cmake)
 endif ()
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
 add_subdirectory(mindspore/ccsrc)
 add_subdirectory(mindspore/core)
-if (ENABLE_TESTCASES)
+if (ENABLE_TESTCASES OR ENABLE_CPP_ST)
     add_subdirectory(tests)
 endif()
 

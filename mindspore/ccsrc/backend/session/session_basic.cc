@@ -424,6 +424,15 @@ KernelGraphPtr SessionBasic::GetGraph(mindspore::GraphId graph_id) const {
   return it->second;
 }
 
+void SessionBasic::ClearGraph() {
+  auto graph_iter = graphs_.begin();
+  while (graph_iter != graphs_.end()) {
+    graph_iter->second.reset();
+    graphs_.erase(graph_iter++);
+  }
+  graph_sum_ = 0;
+}
+
 void SessionBasic::InitInternalOutputParameter(const AnfNodePtr &out_node, const AnfNodePtr &parameter) {
   auto graph_id = GetGraphIdByNode(out_node);
   if (graph_id == kInvalidGraphId) {
@@ -1012,6 +1021,12 @@ std::shared_ptr<KernelGraph> SessionBasic::ConstructKernelGraph(const FuncGraphP
         (void)ConstructKernelGraph(child_graph, all_out_graph);
       }
       (void)CreateValueNodeKernelGraph(node, graph.get());
+      auto &parent_graph = parent_graphs_[front_backend_graph_map_[child_graph]->graph_id()];
+      auto parent_graph_it =
+        std::find(parent_graph.begin(), parent_graph.end(), front_backend_graph_map_[func_graph]->graph_id());
+      if (parent_graph_it == parent_graph.end()) {
+        parent_graph.push_back(front_backend_graph_map_[func_graph]->graph_id());
+      }
       continue;
     }
     // Create cnode
@@ -1096,10 +1111,10 @@ void SessionBasic::LoadInputData(const std::shared_ptr<KernelGraph> &kernel_grap
     input_ctrl_size = LoadCtrlInputTensor(kernel_graph, &inputs);
   }
   auto &input_nodes = kernel_graph->input_nodes();
-
-  if ((inputs.size() + input_ctrl_size) - 3 != input_nodes.size()) {
+  auto extra_param_size = kernel_graph->GetExtraParamAndTensor().size();
+  if ((inputs.size() + input_ctrl_size) - 3 != input_nodes.size() - extra_param_size) {
     MS_LOG(EXCEPTION) << "Tensor input:" << inputs.size() << " is not equal graph inputs:" << input_nodes.size()
-                      << ", input_ctrl_size:" << input_ctrl_size;
+                      << ", input_ctrl_size:" << input_ctrl_size << ", extra_param_size:" << extra_param_size;
   }
   auto ms_context = MsContext::GetInstance();
   MS_EXCEPTION_IF_NULL(ms_context);
@@ -1158,7 +1173,13 @@ void SessionBasic::UpdateOutputs(const std::shared_ptr<KernelGraph> &kernel_grap
     auto &tensor = item.first;
     auto &node = item.second.first;
     auto &output_index = item.second.second;
-    auto address = AnfAlgo::GetMutableOutputAddr(node, output_index);
+    DeviceAddressPtr address = nullptr;
+    if (ms_context->get_param<int>(MS_CTX_EXECUTION_MODE) == kPynativeMode &&
+        ms_context->get_param<bool>(MS_CTX_ENABLE_PYNATIVE_INFER)) {
+      address = AnfAlgo::GetMutableOutputAddr(node, output_index, false);
+    } else {
+      address = AnfAlgo::GetMutableOutputAddr(node, output_index);
+    }
     MS_EXCEPTION_IF_NULL(tensor);
     tensor->set_device_address(address);
     tensor->SetNeedWait(false);
@@ -1415,6 +1436,13 @@ std::vector<AnfNodePtr> ExtendNodeUsers(const FuncGraphManagerPtr &front_func_gr
       continue;
     }
     if (IsPrimitiveCNode(user.first, prim::kPrimDepend)) {
+      auto depend_cnode = user.first->cast<CNodePtr>();
+      if (depend_cnode == nullptr) {
+        continue;
+      }
+      if (front_node != depend_cnode->input(1)) {
+        continue;
+      }
       auto res = ExtendNodeUsers(front_func_graph_manager, user.first);
       result.insert(result.end(), res.begin(), res.end());
       continue;
@@ -1556,7 +1584,8 @@ void SessionBasic::CreateOutputNode(const CNodePtr &cnode, const std::shared_ptr
 
 std::shared_ptr<KernelGraph> SessionBasic::ConstructSingleOpGraph(const OpRunInfo &op_run_info,
                                                                   const std::vector<tensor::TensorPtr> &input_tensors,
-                                                                  const std::vector<int64_t> &tensors_mask) {
+                                                                  const std::vector<int64_t> &tensors_mask,
+                                                                  bool is_ascend) {
   auto graph = std::make_shared<KernelGraph>();
   graph->set_graph_id(graph_sum_);
   graph_sum_++;
@@ -1599,9 +1628,22 @@ std::shared_ptr<KernelGraph> SessionBasic::ConstructSingleOpGraph(const OpRunInf
   graph->set_execution_order(exe_order);
   graph->UpdateGraphDynamicAttr();
   // set output
-  CreateOutputNode(cnode, graph);
+  if (is_ascend) {
+    graph->set_output(cnode);
+  } else {
+    CreateOutputNode(cnode, graph);
+  }
   graph->SetInputNodes();
-  UnifyMindIR(graph);
+  auto manager = MakeManager({graph});
+  if (manager != nullptr) {
+    manager->AddFuncGraph(graph);
+    graph->set_manager(manager);
+  }
+  auto ms_context = MsContext::GetInstance();
+  MS_EXCEPTION_IF_NULL(ms_context);
+  if (ms_context->get_param<bool>(MS_CTX_ENABLE_PYNATIVE_INFER)) {
+    UnifyMindIR(graph);
+  }
   return graph;
 }
 
@@ -1657,11 +1699,6 @@ void SessionBasic::RunOpsInGraph(const GraphId &graph_id, const std::vector<tens
   executor_->RunOpsInGraph(shared_from_this(), graph_id, inputs, outputs);
 }
 
-void SessionBasic::CleanUselessTensors(const std::shared_ptr<std::vector<tensor::TensorPtr>> &useless_tensors) {
-  MS_EXCEPTION_IF_NULL(executor_);
-  executor_->CleanUselessTensors(shared_from_this(), useless_tensors);
-}
-
 void SessionBasic::RunGraph(const GraphId &graph_id, const std::vector<tensor::TensorPtr> &inputs, VectorRef *outputs) {
   MS_EXCEPTION_IF_NULL(executor_);
   executor_->RunGraph(shared_from_this(), graph_id, inputs, outputs);
@@ -1710,22 +1747,6 @@ void SessionBasic::UpdateGraphDynamicShapeAttr(const NotNull<KernelGraphPtr> &ro
   root_graph->UpdateGraphDynamicAttr();
 }
 
-void SessionBasic::CleanUselessTensorsImpl(const std::shared_ptr<std::vector<tensor::TensorPtr>> &useless_tensors) {
-  auto ms_context = MsContext::GetInstance();
-  std::string device_target = ms_context->get_param<std::string>(MS_CTX_DEVICE_TARGET);
-  if (device_target == "CPU") {
-    return;
-  }
-  for (const auto &tensor : *useless_tensors) {
-    MS_EXCEPTION_IF_NULL(tensor);
-    const auto &shape = tensor->shape();
-    if (!shape.empty()) {
-      // The address of scalar value node does not need to be deleted
-      tensor->set_device_address(nullptr);
-    }
-  }
-}
-
 bool SessionBasic::IsGetNextGraph(const GraphId &graph_id, std::string *channel_name) {
   auto kernel_graph = graphs_[graph_id];
   MS_EXCEPTION_IF_NULL(kernel_graph);
@@ -1739,6 +1760,22 @@ bool SessionBasic::IsGetNextGraph(const GraphId &graph_id, std::string *channel_
     }
   }
   return false;
+}
+
+void SessionBasic::RunOpRemoveNopNode(const KernelGraphPtr &kernel_graph) const {
+  auto ms_context = MsContext::GetInstance();
+  MS_EXCEPTION_IF_NULL(ms_context);
+  if (!ms_context->get_param<bool>(MS_CTX_ENABLE_PYNATIVE_INFER)) {
+    opt::RemoveNopNode(kernel_graph.get());
+  }
+}
+
+void SessionBasic::RunOpHideNopNode(const KernelGraphPtr &kernel_graph) const {
+  auto ms_context = MsContext::GetInstance();
+  MS_EXCEPTION_IF_NULL(ms_context);
+  if (!ms_context->get_param<bool>(MS_CTX_ENABLE_PYNATIVE_INFER)) {
+    opt::HideNopNode(kernel_graph.get());
+  }
 }
 
 #if (ENABLE_CPU && (ENABLE_D || ENABLE_GPU))

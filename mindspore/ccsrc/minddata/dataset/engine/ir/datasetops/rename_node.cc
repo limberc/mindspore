@@ -43,6 +43,7 @@ void RenameNode::Print(std::ostream &out) const {
 }
 
 Status RenameNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   if (input_columns_.size() != output_columns_.size()) {
     std::string err_msg = "RenameNode: input and output columns must be the same size";
     MS_LOG(ERROR) << err_msg;
@@ -56,10 +57,17 @@ Status RenameNode::ValidateParams() {
   return Status::OK();
 }
 
-Status RenameNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
+Status RenameNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   node_ops->push_back(std::make_shared<RenameOp>(input_columns_, output_columns_, connector_que_size_));
   return Status::OK();
 }
 
+Status RenameNode::to_json(nlohmann::json *out_json) {
+  nlohmann::json args;
+  args["input_columns"] = input_columns_;
+  args["output_columns"] = output_columns_;
+  *out_json = args;
+  return Status::OK();
+}
 }  // namespace dataset
 }  // namespace mindspore

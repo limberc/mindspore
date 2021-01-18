@@ -149,6 +149,11 @@ class SamplerRT {
   // @return Status The status code returned
   Status GetAssociatedChildId(int64_t *out_associated_id, int64_t id);
 
+  /// \brief Get the arguments of node
+  /// \param[out] out_json JSON string of all attributes
+  /// \return Status of the function
+  virtual Status to_json(nlohmann::json *out_json) { return Status::OK(); }
+
  protected:
   // Number of rows of data from the place this sampler is sampling from. If this sampler
   // has a child sampler, num_rows_ is the number of ids the child sampler will
@@ -160,6 +165,7 @@ class SamplerRT {
   // amount.
   int64_t num_samples_;
 
+  bool is_initialized;
   int64_t samples_per_buffer_;
   std::unique_ptr<ColDescriptor> col_desc_;
   std::vector<std::shared_ptr<SamplerRT>> child_;  // Child nodes

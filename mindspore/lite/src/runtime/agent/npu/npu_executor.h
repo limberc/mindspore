@@ -28,13 +28,13 @@ namespace mindspore::lite {
 class NPUExecutor : public Executor {
  public:
   explicit NPUExecutor(const std::string &model_name) { this->model_name_ = model_name; }
-  ~NPUExecutor() override = default;
+  ~NPUExecutor() override;
   int Prepare(const std::vector<kernel::LiteKernel *> &kernels) override;
 
   int Run(const std::vector<Tensor *> &in_tensors, const std::vector<Tensor *> &out_tensors,
-          const std::vector<kernel::LiteKernel *> &kernels, const std::vector<bool> &inputs_nhwc2nchw,
-          const std::vector<bool> &outputs_nchw2nhwc, Allocator *allocator = nullptr,
-          const KernelCallBack &before = nullptr, const KernelCallBack &after = nullptr);
+          const std::vector<kernel::LiteKernel *> &out_kernels, const std::vector<kernel::LiteKernel *> &kernels,
+          Allocator *allocator = nullptr, const KernelCallBack &before = nullptr,
+          const KernelCallBack &after = nullptr);
 
  private:
   int GetIOTensorVec();

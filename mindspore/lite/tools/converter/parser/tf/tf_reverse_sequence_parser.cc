@@ -9,7 +9,7 @@
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WRRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -63,7 +63,11 @@ STATUS TFReverseSequenceParser::Parse(const tensorflow::NodeDef &tf_op,
   }
 
   *output_size = 1;
-  return AddOpInput(tf_op, 0, inputs);
+  auto status = AddOpInput(tf_op, 0, inputs);
+  if (status != RET_OK) {
+    return status;
+  }
+  return AddOpInput(tf_op, 1, inputs);
 }
 TFNodeRegistrar g_tfReverseSequenceParser("ReverseSequence", new TFReverseSequenceParser());
 }  // namespace lite

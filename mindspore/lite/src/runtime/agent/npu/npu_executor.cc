@@ -19,8 +19,14 @@
 #include "src/runtime/agent/npu/npu_manager.h"
 #include "nnacl/pack.h"
 namespace mindspore::lite {
+NPUExecutor::~NPUExecutor() {
+  client_.reset();
+  npu_input_tensors_.clear();
+  npu_output_tensors_.clear();
+}
+
 int NPUExecutor::Prepare(const std::vector<kernel::LiteKernel *> &kernels) {
-  this->client_ = mindspore::lite::NPUManager::GetInstance()->GetClient();
+  this->client_ = mindspore::lite::NPUManager::GetInstance()->GetClient(model_name_);
   if (this->client_ == nullptr) {
     MS_LOG(ERROR) << "client is nullptr.";
     return RET_ERROR;
@@ -32,22 +38,60 @@ int NPUExecutor::Prepare(const std::vector<kernel::LiteKernel *> &kernels) {
   return RET_OK;
 }
 
+bool IsSameShapeTensor(Tensor *tensor, std::shared_ptr<hiai::AiTensor> npu_tensor) {
+  if (tensor->shape().size() > 4) {
+    MS_LOG(ERROR) << "Npu does not support input tensor dims greater than 4";
+    return false;
+  }
+  if (tensor->shape().size() == 4) {
+    return tensor->Batch() == npu_tensor->GetTensorDimension().GetNumber() &&
+           tensor->Channel() == npu_tensor->GetTensorDimension().GetChannel() &&
+           tensor->Height() == npu_tensor->GetTensorDimension().GetHeight() &&
+           tensor->Width() == npu_tensor->GetTensorDimension().GetWidth();
+  }
+  std::vector<int> npu_shape;
+  auto dim = tensor->shape().size();
+  if (dim > 0) {
+    npu_shape.push_back(npu_tensor->GetTensorDimension().GetNumber());
+  }
+  if (dim > 1) {
+    npu_shape.push_back(npu_tensor->GetTensorDimension().GetChannel());
+  }
+  if (dim > 2) {
+    npu_shape.push_back(npu_tensor->GetTensorDimension().GetHeight());
+  }
+  return npu_shape == tensor->shape();
+}
+
 int NPUExecutor::Run(const std::vector<Tensor *> &in_tensors, const std::vector<Tensor *> &out_tensors,
-                     const std::vector<kernel::LiteKernel *> &kernels, const std::vector<bool> &inputs_nhwc2nchw,
-                     const std::vector<bool> &outputs_nchw2nhwc, Allocator *allocator, const KernelCallBack &before,
-                     const KernelCallBack &after) {
+                     const std::vector<kernel::LiteKernel *> &out_kernels,
+                     const std::vector<kernel::LiteKernel *> &kernels, Allocator *allocator,
+                     const KernelCallBack &before, const KernelCallBack &after) {
   hiai::AiContext context;
+  std::vector<bool> inputs_visited(in_tensors.size(), false);
   for (int i = 0; i < npu_input_tensors_.size(); ++i) {
-    void *data = in_tensors[i]->data_c();
-    if (data == nullptr) {
-      MS_LOG(ERROR) << model_name_ << " inputs data is nullptr";
-      return RET_ERROR;
-    }
-    if (inputs_nhwc2nchw[i]) {
-      PackNHWCToNCHWFp32(data, npu_input_tensors_[i]->GetBuffer(), in_tensors[i]->Batch(),
-                         in_tensors[i]->Width() * in_tensors[i]->Height(), in_tensors[i]->Channel());
-    } else {
-      memcpy(npu_input_tensors_[i]->GetBuffer(), data, in_tensors[i]->Size());
+    int index = 0;
+    for (; index < in_tensors.size(); index++) {
+      if (!inputs_visited[index] && IsSameShapeTensor(in_tensors[index], npu_input_tensors_[i])) {
+        void *data = in_tensors[index]->data_c();
+        if (data == nullptr) {
+          MS_LOG(ERROR) << model_name_ << " Inputs data is nullptr";
+          return RET_ERROR;
+        }
+
+        memcpy(npu_input_tensors_[i]->GetBuffer(), data, in_tensors[index]->Size());
+        inputs_visited[index] = true;
+        in_tensors[index]->set_ref_count(in_tensors[index]->ref_count() - 1);
+        if (in_tensors[index]->ref_count() <= 0) {
+          in_tensors[index]->FreeData();
+        }
+        break;
+      }
+      if (index == in_tensors.size()) {
+        MS_LOG(ERROR) << "Can't find corresponding ms lite tensor of " << i << " input tensor for npu executor "
+                      << model_name_;
+        return RET_ERROR;
+      }
     }
   }
   context.AddPara("model_name", model_name_);
@@ -68,12 +112,7 @@ int NPUExecutor::Run(const std::vector<Tensor *> &in_tensors, const std::vector<
       MS_LOG(ERROR) << "Malloc buffer failed.";
       return RET_ERROR;
     }
-    if (outputs_nchw2nhwc[i]) {
-      PackNCHWToNHWCFp32(npu_output_tensors_[i]->GetBuffer(), data, out_tensors[i]->Batch(),
-                         out_tensors[i]->Width() * out_tensors[i]->Height(), out_tensors[i]->Channel());
-    } else {
-      memcpy(data, npu_output_tensors_[i]->GetBuffer(), npu_output_tensors_[i]->GetSize());
-    }
+    memcpy(data, npu_output_tensors_[i]->GetBuffer(), npu_output_tensors_[i]->GetSize());
     out_tensors[i]->ResetRefCount();
   }
   return RET_OK;

@@ -16,127 +16,23 @@
 
 #include <memory>
 #include <string>
-#include "minddata/dataset/core/client.h"
+
 #include "common/common.h"
 #include "gtest/gtest.h"
-
-#include "minddata/dataset/engine/execution_tree.h"
+#include "minddata/dataset/core/client.h"
 #include "minddata/dataset/engine/ir/datasetops/dataset_node.h"
+#include "minddata/dataset/engine/ir/datasetops/map_node.h"
+#include "minddata/dataset/engine/opt/optional/tensor_op_fusion_pass.h"
 #include "minddata/dataset/engine/opt/post/auto_worker_pass.h"
-#include "minddata/dataset/engine/opt/pre/getter_pass.h"
+#include "minddata/dataset/include/transforms.h"
+#include "minddata/dataset/include/vision.h"
+#include "minddata/dataset/include/vision_lite.h"
 
 using namespace mindspore::dataset;
 using mindspore::LogStream;
 using mindspore::MsLogLevel::INFO;
 
-class MindDataTestOptimizationPass : public UT::DatasetOpTesting {
- public:
-  MindDataTestOptimizationPass() = default;
-  void SetUp() override { GlobalInit(); }
-
-  // this recursive function helps build a ExecutionTree from a IR node, it is copied from TreeAdapter
-  Status DFSBuild(std::shared_ptr<DatasetNode> ir, std::shared_ptr<DatasetOp> *op, ExecutionTree *tree) {
-    std::vector<std::shared_ptr<DatasetOp>> ops;
-    RETURN_IF_NOT_OK(ir->Build(&ops));
-    CHECK_FAIL_RETURN_UNEXPECTED(!ops.empty() && tree != nullptr && op != nullptr, "Fail To Build Tree.");
-    (*op) = ops.front();
-    RETURN_IF_NOT_OK(tree->AssociateNode(*op));
-    for (size_t i = 1; i < ops.size(); i++) {
-      RETURN_IF_NOT_OK(tree->AssociateNode(ops[i]));
-      RETURN_IF_NOT_OK(ops[i - 1]->AddChild(ops[i]));
-    }
-    for (std::shared_ptr<DatasetNode> child_ir : ir->Children()) {
-      std::shared_ptr<DatasetOp> child_op;
-      RETURN_IF_NOT_OK(DFSBuild(child_ir, &child_op, tree));
-      RETURN_IF_NOT_OK(ops.back()->AddChild(child_op));  // append children to the last of ops
-    }
-    return Status::OK();
-  }
-
-  // this function will build an execution_tree from a root ir node. nullptr will be returned if error occurs
-  std::unique_ptr<ExecutionTree> BuildTree(std::shared_ptr<DatasetNode> ir) {
-    std::unique_ptr<ExecutionTree> tree = std::make_unique<ExecutionTree>();
-    std::shared_ptr<DatasetOp> root;
-    if (DFSBuild(ir, &root, tree.get()).IsError()) return nullptr;
-    if (tree->AssignRoot(root).IsError()) return nullptr;
-    return tree;
-  }
-};
-
-TEST_F(MindDataTestOptimizationPass, MindDataTestOutputShapeAndTypePass) {
-  MS_LOG(INFO) << "Doing MindDataTestOptimizationPass-MindDataTestOutputShapeAndTypePass.";
-  // config leaf_op, use random_data to avoid I/O
-  std::shared_ptr<SchemaObj> schema = std::make_shared<SchemaObj>();
-  ASSERT_TRUE(schema->add_column("label", "uint32", {}));
-  std::shared_ptr<Dataset> ds = RandomData(44, schema)->Repeat(2)->Project({"label"})->Shuffle(10)->Batch(2);
-
-  std::unique_ptr<ExecutionTree> exe_tree = BuildTree(ds->IRNode());
-
-  ASSERT_NE(exe_tree, nullptr);
-
-  // test the optimization pass
-  // OptPass is supposed to remove concat, filter repeat, shuffle skip, take and set the callback of map to empty
-  std::function<OptPass(OptPass)> pass = [](OptPass pre) {
-    // return a new pass, this will override all the existing pre-pass es
-    pre.clear();
-    pre.push_back(std::make_unique<GetterPass>(GetterPass::kOutputShapeAndType));
-    return pre;
-  };
-
-  exe_tree->SetPrePassOverride(pass);
-  ASSERT_OK(exe_tree->PreAction());
-  std::stringstream ss;
-
-  // print the tree in std::string as a way to verify that nodes are indeed removed
-  exe_tree->Print(ss);
-  std::string ss_str = ss.str();
-
-  // ss_str would look like this
-  //  +- ( 0) <BatchOp>: [workers: 4] [batch size: 2]
-  //    +- ( 2) <ProjectOp>: [workers: 0 (inlined)]
-  //        +- ( 4) <RandomDataOp>: [workers: 4] [total rows: 44]
-  //
-
-  // verify that no ops are removed, but Batch and ProjectOp are not
-  EXPECT_NE(ss_str.find("ShuffleOp"), ss_str.npos);
-  EXPECT_NE(ss_str.find("RepeatOp"), ss_str.npos);
-  EXPECT_NE(ss_str.find("ProjectOp"), ss_str.npos);
-  EXPECT_NE(ss_str.find("BatchOp"), ss_str.npos);
-}
-
-TEST_F(MindDataTestOptimizationPass, MindDataTestDatasetSizePass) {
-  MS_LOG(INFO) << "Doing MindDataTestOptimizationPass-MindDataTestDatasetSizePass.";
-  // config leaf_op, use random_data to avoid I/O
-  std::shared_ptr<SchemaObj> schema = std::make_shared<SchemaObj>();
-  ASSERT_TRUE(schema->add_column("label", "uint32", {}));
-  std::shared_ptr<Dataset> ds = RandomData(44, schema)->Repeat(2)->Project({"label"})->Shuffle(10)->Batch(2);
-
-  std::unique_ptr<ExecutionTree> exe_tree = BuildTree(ds->IRNode());
-
-  ASSERT_NE(exe_tree, nullptr);
-
-  // test the optimization pass
-  // OptPass is supposed to remove concat, filter repeat, shuffle skip, take and set the callback of map to empty
-  std::function<OptPass(OptPass)> pass = [](OptPass pre) {
-    // return a new pass, this will override all the existing pre-pass es
-    pre.clear();  // remove all existing pre pass
-    pre.push_back(std::make_unique<GetterPass>(GetterPass::kDatasetSize));
-    return pre;
-  };
-
-  exe_tree->SetPrePassOverride(pass);
-  ASSERT_OK(exe_tree->PreAction());
-  std::stringstream ss;
-  // print the tree in std::string as a way to verify that nodes are indeed removed
-  exe_tree->Print(ss);
-  std::string ss_str = ss.str();
-
-  // verify that no ops are removed, but Batch and ProjectOp are not
-  EXPECT_NE(ss_str.find("ShuffleOp"), ss_str.npos);
-  EXPECT_NE(ss_str.find("RepeatOp"), ss_str.npos);
-  EXPECT_NE(ss_str.find("ProjectOp"), ss_str.npos);
-  EXPECT_NE(ss_str.find("BatchOp"), ss_str.npos);
-}
+class MindDataTestOptimizationPass : public UT::DatasetOpTesting {};
 
 TEST_F(MindDataTestOptimizationPass, MindDataTestAutoWorkerPass) {
   MS_LOG(INFO) << "Doing MindDataTestOptimizationPass-MindDataTestAutoWorkerPass.";
@@ -168,4 +64,42 @@ TEST_F(MindDataTestOptimizationPass, MindDataTestAutoWorkerPass) {
   MS_LOG(DEBUG) << nonmap_leaf->IRNode()->Name() << ": num_worker=" << nonmap_leaf->IRNode()->num_workers();
   MS_LOG(DEBUG) << batch->IRNode()->Name() << ": num_worker=" << batch->IRNode()->num_workers();
   MS_LOG(DEBUG) << map->IRNode()->Name() << ": num_worker=" << map->IRNode()->num_workers();
+}
+
+TEST_F(MindDataTestOptimizationPass, MindDataTestTensorFusionPass) {
+  MS_LOG(INFO) << "Doing MindDataTestOptimizationPass-MindDataTestTensorFusionPass.";
+  std::string folder_path = datasets_root_path_ + "/testPK/data/";
+  std::shared_ptr<Dataset> root =
+    ImageFolder(folder_path, false)->Map({vision::Decode(), vision::RandomResizedCrop({100})}, {"image"});
+
+  TensorOpFusionPass fusion_pass;
+  bool modified = false;
+  std::shared_ptr<MapNode> map_node = std::dynamic_pointer_cast<MapNode>(root->IRNode());
+  // no deepcopy is performed because this doesn't go through tree_adapter
+  fusion_pass.Run(root->IRNode(), &modified);
+  EXPECT_EQ(modified, true);
+  ASSERT_NE(map_node, nullptr);
+  auto fused_ops = map_node->operations();
+  ASSERT_EQ(fused_ops.size(), 1);
+  ASSERT_EQ(fused_ops[0]->Name(), vision::kRandomCropDecodeResizeOperation);
+}
+
+TEST_F(MindDataTestOptimizationPass, MindDataTestTensorFusionPassPreBuiltTensorOperation) {
+  MS_LOG(INFO) << "Doing MindDataTestOptimizationPass-MindDataTestTensorFusionPassPreBuiltTensorOperation.";
+  std::string folder_path = datasets_root_path_ + "/testPK/data/";
+  // make prebuilt tensor operation
+  auto decode = std::make_shared<transforms::PreBuiltOperation>(vision::Decode()->Build());
+  auto resize = std::make_shared<transforms::PreBuiltOperation>(vision::RandomResizedCrop({100})->Build());
+  std::shared_ptr<Dataset> root = ImageFolder(folder_path, false)->Map({decode, resize}, {"image"});
+
+  TensorOpFusionPass fusion_pass;
+  bool modified = false;
+  std::shared_ptr<MapNode> map_node = std::dynamic_pointer_cast<MapNode>(root->IRNode());
+  // no deepcopy is performed because this doesn't go through tree_adapter
+  fusion_pass.Run(root->IRNode(), &modified);
+  EXPECT_EQ(modified, true);
+  ASSERT_NE(map_node, nullptr);
+  auto fused_ops = map_node->operations();
+  ASSERT_EQ(fused_ops.size(), 1);
+  ASSERT_EQ(fused_ops[0]->Name(), kRandomCropDecodeResizeOp);
 }

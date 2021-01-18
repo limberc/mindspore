@@ -67,6 +67,7 @@ std::shared_ptr<DatasetNode> MindDataNode::Copy() {
 void MindDataNode::Print(std::ostream &out) const { out << Name() + "(file:" + dataset_file_ + ",...)"; }
 
 Status MindDataNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   if (!search_for_pattern_ && dataset_files_.size() > 4096) {
     std::string err_msg =
       "MindDataNode: length of dataset_file must be less than or equal to 4096, dataset_file length: " +
@@ -149,7 +150,7 @@ Status MindDataNode::BuildMindDatasetSamplerChain(const std::shared_ptr<SamplerO
 // Helper function to set sample_bytes from py::byte type
 void MindDataNode::SetSampleBytes(std::map<std::string, std::string> *sample_bytes) { sample_bytes_ = *sample_bytes; }
 
-Status MindDataNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
+Status MindDataNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   RETURN_IF_NOT_OK(BuildMindDatasetSamplerChain(sampler_, &operators_, num_padded_));
 
   std::shared_ptr<MindRecordOp> mindrecord_op;
@@ -186,7 +187,7 @@ Status MindDataNode::GetDatasetSize(const std::shared_ptr<DatasetSizeGetter> &si
     *dataset_size = dataset_size_;
     return Status::OK();
   }
-  int64_t num_rows;
+  int64_t num_rows = -1;
   std::vector<std::shared_ptr<ShardOperator>> operators;
   RETURN_IF_NOT_OK(BuildMindDatasetSamplerChain(sampler_, &operators, num_padded_));
 

@@ -18,14 +18,18 @@ MNIST, Cifar10/100, Manifest, MindRecord, and more. This module loads data with
 high performance and parses data precisely. Some of the operations that are
 provided to users to preprocess data include shuffle, batch, repeat, map, and zip.
 """
+import atexit
 import glob
 import json
 import math
 import os
+import signal
+import time
 import uuid
 import multiprocessing
 import queue
 from enum import Enum
+from functools import partial
 from importlib import import_module
 import sys
 import threading
@@ -199,6 +203,18 @@ class Dataset:
         args["num_parallel_workers"] = self.num_parallel_workers
         return args
 
+    def to_json(self, filename=""):
+        """
+        Serialize a pipeline into JSON string and dump into file if filename is provided.
+
+        Args:
+            filename (str): filename of json file to be saved as
+
+        Returns:
+            Str, JSON string of the pipeline.
+        """
+        return json.loads(self.parse_tree().to_json(filename))
+
     @check_bucket_batch_by_length
     def bucket_batch_by_length(self, column_names, bucket_boundaries, bucket_batch_sizes,
                                element_length_function=None, pad_info=None,
@@ -298,14 +314,14 @@ class Dataset:
                 The last parameter of the callable should always be a BatchInfo object. Per_batch_map should return
                 (list[Tensor], list[Tensor], ...). The length of each list in output should be same as the input.
                 output_columns is required if the number of output lists is different from input.
-            input_columns (list[str], optional): List of names of the input columns. The size of the list should
-                match with signature of per_batch_map callable.
-            output_columns (list[str], optional): List of names assigned to the columns
+            input_columns (Union[str, list[str]], optional): List of names of the input columns. The size of the list
+                should match with signature of per_batch_map callable.
+            output_columns (Union[str, list[str]], optional): List of names assigned to the columns
                 outputted by the last operation. This parameter is mandatory if len(input_columns) !=
                 len(output_columns). The size of this list must match the number of output
                 columns of the last operation. (default=None, output columns will have the same
                 name as the input columns, i.e., the columns will be replaced).
-            column_order (list[str], optional): List of all the desired columns to propagate to
+            column_order (Union[str, list[str]], optional): List of all the desired columns to propagate to
                 the child node. This list must be a subset of all the columns in the dataset after
                 all operations are applied. The order of the columns in each row propagated to the
                 child node follow the order they appear in this list. The parameter is mandatory
@@ -475,12 +491,12 @@ class Dataset:
         Args:
             operations (Union[list[TensorOp], list[functions]]): List of operations to be
                 applied on the dataset. Operations are applied in the order they appear in this list.
-            input_columns (list[str], optional): List of the names of the columns that will be passed to
+            input_columns (Union[str, list[str]], optional): List of the names of the columns that will be passed to
                 the first operation as input. The size of this list must match the number of
                 input columns expected by the first operator. (default=None, the first
                 operation will be passed however many columns that is required, starting from
                 the first column).
-            output_columns (list[str], optional): List of names assigned to the columns outputted by
+            output_columns (Union[str, list[str]], optional): List of names assigned to the columns outputted by
                 the last operation. This parameter is mandatory if len(input_columns) !=
                 len(output_columns). The size of this list must match the number of output
                 columns of the last operation. (default=None, output columns will have the same
@@ -628,7 +644,7 @@ class Dataset:
 
         Args:
             predicate (callable): Python callable which returns a boolean value. If False then filter the element.
-            input_columns (list[str], optional): List of names of the input columns, when
+            input_columns (Union[str, list[str]], optional): List of names of the input columns, when
                 default=None, the predicate will be applied on all columns in the dataset.
             num_parallel_workers (int, optional): Number of workers to process the dataset
                 in parallel (default=None).
@@ -931,8 +947,8 @@ class Dataset:
         Rename the columns in input datasets.
 
         Args:
-            input_columns (list[str]): List of names of the input columns.
-            output_columns (list[str]): List of names of the output columns.
+            input_columns (Union[str, list[str]]): List of names of the input columns.
+            output_columns (Union[str, list[str]]): List of names of the output columns.
 
         Returns:
             RenameDataset, dataset renamed.
@@ -961,7 +977,7 @@ class Dataset:
         the pipeline in the order specified. The other columns are discarded.
 
         Args:
-            columns(list[str]): List of names of the columns to project.
+            columns(Union[str, list[str]]): List of names of the columns to project.
 
         Returns:
             ProjectDataset, dataset projected.
@@ -988,7 +1004,7 @@ class Dataset:
 
         Args:
 
-            columns(list[str]): Column names to get words from.
+            columns(Union[str, list[str]]): Column names to get words from.
             freq_range(tuple[int]): A tuple of integers (min_frequency, max_frequency). Words within the frequency
                 range would be kept. 0 <= min_frequency <= max_frequency <= total_words. min_frequency/max_frequency
                 an be set to default, which corresponds to 0/total_words separately
@@ -1253,7 +1269,7 @@ class Dataset:
         del api_tree
 
     @check_tuple_iterator
-    def create_tuple_iterator(self, columns=None, num_epochs=-1, output_numpy=False):
+    def create_tuple_iterator(self, columns=None, num_epochs=-1, output_numpy=False, do_copy=True):
         """
         Create an iterator over the dataset. The data retrieved will be a list of ndarrays of data.
 
@@ -1267,6 +1283,8 @@ class Dataset:
                 (default=-1, iterator can be iterated infinite number of epochs)
             output_numpy (bool, optional): Whether or not to output NumPy datatype.
                 If output_numpy=False, iterator will output MSTensor (default=False).
+            do_copy (bool, optional): when output data type is mindspore.Tensor,
+                use this param to select the conversion method, only take False for better performance (default=True).
 
         Returns:
             Iterator, list of ndarrays.
@@ -1288,7 +1306,7 @@ class Dataset:
 
         if Dataset._noop_mode():
             return DummyIterator(self, 'tuple')
-        return TupleIterator(self, columns, num_epochs, output_numpy)
+        return TupleIterator(self, columns, num_epochs, output_numpy, do_copy)
 
     @check_dict_iterator
     def create_dict_iterator(self, num_epochs=-1, output_numpy=False):
@@ -1358,6 +1376,9 @@ class Dataset:
     @input_indexs.setter
     def input_indexs(self, value):
         self._input_indexs = value
+
+    def copy_batch_size(self, value):
+        self._batch_size = value
 
     def _init_tree_getters(self):
         """
@@ -1816,14 +1837,14 @@ class BatchDataset(Dataset):
             (list[Tensor], list[Tensor], ..., BatchInfo) as input parameters. Each list[Tensor] represents a batch of
             Tensors on a given column. The number of lists should match with number of entries in input_columns. The
             last parameter of the callable must always be a BatchInfo object.
-        input_columns (list[str], optional): List of names of the input columns. The size of the list must
+        input_columns (Union[str, list[str]], optional): List of names of the input columns. The size of the list must
             match with signature of per_batch_map callable.
-        output_columns (list[str], optional): List of names assigned to the columns outputted by
+        output_columns (Union[str, list[str]], optional): List of names assigned to the columns outputted by
             the last operation. This parameter is mandatory if len(input_columns) !=
             len(output_columns). The size of this list must match the number of output
             columns of the last operation. (default=None, output columns will have the same
             name as the input columns, i.e., the columns will be replaced).
-        column_order (list[str], optional): List of all the desired columns to propagate to the
+        column_order (Union[str, list[str]], optional): List of all the desired columns to propagate to the
             child node. This list must be a subset of all the columns in the dataset after
             all operations are applied. The order of the columns in each row propagated to the
             child node follow the order they appear in this list. The parameter is mandatory
@@ -1931,6 +1952,7 @@ class BatchDataset(Dataset):
         new_op.saved_output_types = self.saved_output_types
         new_op.saved_output_shapes = self.saved_output_shapes
         new_op.input_indexs = copy.deepcopy(self._input_indexs, memodict)
+        new_op.copy_batch_size(copy.deepcopy(self._batch_size, memodict))
         new_op.dataset_size = self.dataset_size
         new_op.pad = self.pad
         new_op.python_multiprocessing = copy.deepcopy(self.python_multiprocessing, memodict)
@@ -1957,6 +1979,7 @@ class BatchDataset(Dataset):
             # Wrap per_batch_map into _PythonCallable
             self.per_batch_map = _PythonCallable(self.per_batch_map, idx, self.process_pool)
             self.hook = _ExceptHookHandler()
+            atexit.register(_mp_pool_exit_preprocess)
 
     def __del__(self):
         if hasattr(self, 'process_pool') and self.process_pool is not None:
@@ -2205,7 +2228,7 @@ class _PythonCallable:
         self.idx = idx
 
     def __call__(self, *args):
-        if self.pool is not None:
+        if self.pool is not None and self.pool._state == 0 and check_iterator_cleanup() is False:  # pylint: disable=W0212
             # This call will send the tensors along with Python callable index to the process pool.
             # Block, yield GIL. Current thread will reacquire GIL once result is returned.
             result = self.pool.apply_async(_pyfunc_worker_exec, [self.idx, *args])
@@ -2225,13 +2248,22 @@ class _PythonCallable:
         return self.py_callable(*args)
 
 
+def _mp_pool_exit_preprocess():
+    if check_iterator_cleanup() is False:
+        logger.info("Execution preprocessing process before map exit.")
+        # Set the iterator_cleanup flag to True before exiting, and wait 3s for all apply_async
+        # applied to the multiprocessing task to prevent multiprocessing from hang when exiting
+        _set_iterator_cleanup()
+        time.sleep(3)
+
+
 class _ExceptHookHandler:
     def __init__(self):
         sys.excepthook = self.__handler_exception
 
     def __handler_exception(self, type, value, tb):
         logger.error("Uncaught exception: ", exc_info=(type, value, tb))
-        _set_iterator_cleanup()
+        _mp_pool_exit_preprocess()
 
 
 class MapDataset(Dataset):
@@ -2242,10 +2274,10 @@ class MapDataset(Dataset):
         input_dataset (Dataset): Input Dataset to be mapped.
         operations (TensorOp): A function mapping a nested structure of tensors
             to another nested structure of tensor (default=None).
-        input_columns (list[str]): List of names of the input columns
+        input_columns (Union[str, list[str]]): List of names of the input columns
             (default=None, the operations will be applied on the first columns in the dataset).
             The size of the list should match the number of inputs of the first operator.
-        output_columns (list[str], optional): List of names of the output columns.
+        output_columns (Union[str, list[str]], optional): List of names of the output columns.
             The size of the list should match the number of outputs of the last operator
             (default=None, output columns will be the input columns, i.e., the columns will
             be replaced).
@@ -2312,10 +2344,16 @@ class MapDataset(Dataset):
 
     def parse(self, children=None):
         column_order = replace_none(self.column_order, [])
+        operations = []
+        for op in self.operations:
+            if op and getattr(op, 'parse', None):
+                operations.append(op.parse())
+            else:
+                operations.append(op)
 
         cc = self.cache.cache_client if self.cache else None
         callbacks = [cb.create_runtime_obj() for cb in self.callbacks] if self.callbacks else []
-        return cde.MapNode(children[0], self.operations, self.input_columns, self.output_columns, column_order, cc,
+        return cde.MapNode(children[0], operations, self.input_columns, self.output_columns, column_order, cc,
                            callbacks).SetNumWorkers(self.num_parallel_workers)
 
     def get_args(self):
@@ -2392,11 +2430,13 @@ class MapDataset(Dataset):
                         iter_specific_operations.append(op)
                 self.operations = iter_specific_operations
                 self.hook = _ExceptHookHandler()
+                atexit.register(_mp_pool_exit_preprocess)
 
     def __del__(self):
         if hasattr(self, 'process_pool') and self.process_pool is not None:
             logger.info("Map process pool is being terminated.")
             self.process_pool.close()
+            self.process_pool.join()
 
 
 class FilterDataset(Dataset):
@@ -2406,7 +2446,7 @@ class FilterDataset(Dataset):
     Args:
         input_dataset (Dataset): Input Dataset to be mapped.
         predicate (callable): Python callable which returns a boolean value. If False then filter the element.
-        input_columns (list[str], optional): List of names of the input columns
+        input_columns (Union[str, list[str]], optional): List of names of the input columns
         (default=None, the predicate will be applied to all columns in the dataset).
         num_parallel_workers (int, optional): Number of workers to process the dataset
             in parallel (default=None).
@@ -2623,7 +2663,7 @@ class ConcatDataset(Dataset):
 
                 tem_sampler = copy.deepcopy(sampler)
                 tem_sampler.set_offset(cumulative_samples_nums)
-                child.sampler = tem_sampler
+                child.use_sampler(tem_sampler)
 
             cumulative_samples_nums += self.children_sizes_[index]
             cumulative_samples_nums %= sampler.num_shards
@@ -2644,8 +2684,8 @@ class RenameDataset(Dataset):
 
     Args:
         input_dataset (Dataset): Input Dataset to be Renamed.
-        input_columns (list[str]): List of names of the input columns.
-        output_columns (list[str]): List of names of the output columns.
+        input_columns (Union[str, list[str]]): List of names of the input columns.
+        output_columns (Union[str, list[str]]): List of names of the output columns.
     """
 
     def __init__(self, input_dataset, input_columns, output_columns):
@@ -2673,7 +2713,7 @@ class ProjectDataset(Dataset):
 
     Args:
         input_dataset (Dataset): Input Dataset to be Projected.
-        columns (list[str]): List of names of the columns to project.
+        columns (Union[str, list[str]]): List of names of the columns to project.
         prefetch_size (int, optional): Prefetch number of records ahead of the
             user's request (default=None).
     """
@@ -2782,7 +2822,7 @@ class TransferDataset(Dataset):
     def create_dict_iterator(self, num_epochs=-1, output_numpy=False):
         raise RuntimeError("TransferDataset is not iterable.")
 
-    def create_tuple_iterator(self, columns=None, num_epochs=-1, output_numpy=False):
+    def create_tuple_iterator(self, columns=None, num_epochs=-1, output_numpy=False, do_copy=True):
         raise RuntimeError("TransferDataset is not iterable.")
 
     def __iter__(self):
@@ -3443,6 +3483,8 @@ class SamplerFn:
         self.workers = []
         self.num_worker = num_worker
         self.multi_process = multi_process
+        self.joined = False
+        self.ppid = os.getpid()
         # Event for end of epoch
         if multi_process is True:
             self.eof = multiprocessing.Event()
@@ -3481,29 +3523,48 @@ class SamplerFn:
 
         # Fetch results
         for i in range(len(indices)):
+            if self.eof.is_set():
+                self._stop_subprocess()
+                return
             # Fetch result and put index
             try:
                 result = self.workers[i % self.num_worker].get()
             except queue.Empty:
+                self._stop_subprocess()
                 raise Exception("Generator worker process timeout.")
             except KeyboardInterrupt:
-                self.eof.set()
-                for w in self.workers:
-                    w.terminate()
-                    w.join()
+                self._stop_subprocess()
                 raise Exception("Generator worker receives KeyboardInterrupt.")
+            if self.eof.is_set():
+                self._stop_subprocess()
+                return
             if idx_cursor < len(indices):
                 idx_cursor = _fill_worker_indices(self.workers, indices, idx_cursor)
             yield tuple([np.array(x, copy=False) for x in result])
 
+    def _stop_subprocess(self):
+        # Only the main process can call join
+        if self.joined is False and self.ppid == os.getpid():
+            self.eof.set()
+            self.joined = True
+            for w in self.workers:
+                w.join()
+
     def __del__(self):
-        self.eof.set()
+        self._stop_subprocess()
 
 
-def _generator_worker_loop(dataset, idx_queue, result_queue, eof):
+def _subprocess_handle(eof, signum, frame):
+    logger.info("The subprocess receives a termination signal.")
+    eof.set()
+
+
+def _generator_worker_loop(dataset, idx_queue, result_queue, eof, is_multiprocessing):
     """
     Multithread or multiprocess generator worker process loop.
     """
+    if is_multiprocessing:
+        signal.signal(signal.SIGTERM, partial(_subprocess_handle, eof))
     while True:
         # Fetch index, block
         try:
@@ -3512,6 +3573,9 @@ def _generator_worker_loop(dataset, idx_queue, result_queue, eof):
             raise Exception("Generator worker receives KeyboardInterrupt.")
         except queue.Empty:
             if eof.is_set():
+                if is_multiprocessing:
+                    idx_queue.cancel_join_thread()
+                    result_queue.cancel_join_thread()
                 return
             # If end-of-file (eof) is not set, continue to get data from idx_queue
             continue
@@ -3521,6 +3585,9 @@ def _generator_worker_loop(dataset, idx_queue, result_queue, eof):
             assert eof.is_set(), ""
             return
         if eof.is_set():
+            if is_multiprocessing:
+                idx_queue.cancel_join_thread()
+                result_queue.cancel_join_thread()
             return
         # Fetch data, any exception from __getitem__ will terminate worker and timeout master process
         result = dataset[idx]
@@ -3532,6 +3599,9 @@ def _generator_worker_loop(dataset, idx_queue, result_queue, eof):
                 raise Exception("Generator worker receives KeyboardInterrupt.")
             except queue.Full:
                 if eof.is_set():
+                    if is_multiprocessing:
+                        idx_queue.cancel_join_thread()
+                        result_queue.cancel_join_thread()
                     return
                 # If eof is not set, continue to put data to result_queue
                 continue
@@ -3547,7 +3617,7 @@ class _GeneratorWorkerMt(threading.Thread):
     def __init__(self, dataset, eof):
         self.idx_queue = queue.Queue(16)
         self.res_queue = queue.Queue(16)
-        super().__init__(target=_generator_worker_loop, args=(dataset, self.idx_queue, self.res_queue, eof))
+        super().__init__(target=_generator_worker_loop, args=(dataset, self.idx_queue, self.res_queue, eof, False))
 
     def put(self, item):
         """
@@ -3563,10 +3633,10 @@ class _GeneratorWorkerMt(threading.Thread):
 
     def queue_empty(self):
         if not self.idx_queue.empty():
-            logger.error("idx_queue is not empty")
+            logger.warning("idx_queue is not empty")
             return False
         if not self.res_queue.empty():
-            logger.error("res_queue is not empty")
+            logger.warning("res_queue is not empty")
             return False
         return True
 
@@ -3579,7 +3649,7 @@ class _GeneratorWorkerMp(multiprocessing.Process):
     def __init__(self, dataset, eof):
         self.idx_queue = multiprocessing.Queue(16)
         self.res_queue = multiprocessing.Queue(16)
-        super().__init__(target=_generator_worker_loop, args=(dataset, self.idx_queue, self.res_queue, eof))
+        super().__init__(target=_generator_worker_loop, args=(dataset, self.idx_queue, self.res_queue, eof, True))
 
     def put(self, item):
         """
@@ -3597,20 +3667,12 @@ class _GeneratorWorkerMp(multiprocessing.Process):
 
     def queue_empty(self):
         if not self.idx_queue.empty():
-            logger.error("idx_queue is not empty.")
+            logger.warning("idx_queue is not empty.")
             return False
         if not self.res_queue.empty():
-            logger.error("res_queue is not empty.")
+            logger.warning("res_queue is not empty.")
             return False
         return True
-
-    def __del__(self):
-        # Try to destruct here, sometimes the class itself will be destructed in advance,
-        # so "self" will be a NoneType
-        try:
-            self.terminate()
-        except AttributeError:
-            pass
 
 
 class GeneratorDataset(MappableDataset):
@@ -3654,8 +3716,8 @@ class GeneratorDataset(MappableDataset):
             iter(source).next().
             Random accessible source is required to return a tuple of NumPy arrays as a row of the dataset on
             source[idx].
-        column_names (list[str], optional): List of column names of the dataset (default=None). Users are required to
-            provide either column_names or schema.
+        column_names (Union[str, list[str]], optional): List of column names of the dataset (default=None). Users are
+            required to provide either column_names or schema.
         column_types (list[mindspore.dtype], optional): List of column data types of the dataset (default=None).
             If provided, sanity check will be performed on generator output.
         schema (Union[Schema, str], optional): Path to the JSON schema file or schema object (default=None). Users are
@@ -3736,6 +3798,20 @@ class GeneratorDataset(MappableDataset):
             self.schema = schema
             if not isinstance(schema, Schema):
                 self.schema = Schema(schema)
+        # Move get dataset_size by len from parse to here, because self.source will
+        # lose attribution of '__len__' after deepcopy.
+        self.dataset_size = None
+        if hasattr(self.source, "__len__"):
+            if not self.num_shards:
+                self.dataset_size = len(self.source)
+            else:
+                self.dataset_size = math.ceil(len(self.source) / self.num_shards)
+
+            rows_from_sampler = self._get_sampler_dataset_size()
+            if self.num_samples is not None and self.num_samples < rows_from_sampler:
+                rows_from_sampler = self.num_samples
+            if rows_from_sampler is not None and rows_from_sampler < self.dataset_size:
+                self.dataset_size = rows_from_sampler
 
     def __deepcopy__(self, memodict):
         if id(self) in memodict:
@@ -3794,24 +3870,16 @@ class GeneratorDataset(MappableDataset):
         return self.sampler.is_sharded()
 
     def parse(self, children=None):
-        dataset_size = -1
-        if hasattr(self.source, "__len__"):
-            if not self.num_shards:
-                dataset_size = len(self.source)
-            else:
-                dataset_size = math.ceil(len(self.source) / self.num_shards)
-
-            rows_from_sampler = self._get_sampler_dataset_size()
-            if rows_from_sampler is not None and rows_from_sampler < dataset_size:
-                dataset_size = rows_from_sampler
+        if self.dataset_size is None:
+            self.dataset_size = -1
         if self.schema is None:
             return cde.GeneratorNode(self.source, self.column_names, self.column_types).SetGeneratorDatasetSize(
-                dataset_size) \
+                self.dataset_size) \
                 .SetNumWorkers(self.num_parallel_workers)
         schema = self.schema
         if isinstance(schema, Schema):
             schema = self.schema.cpp_schema
-        return cde.GeneratorNode(self.source, schema).SetGeneratorDatasetSize(dataset_size).SetNumWorkers(
+        return cde.GeneratorNode(self.source, schema).SetGeneratorDatasetSize(self.dataset_size).SetNumWorkers(
             self.num_parallel_workers)
 
 

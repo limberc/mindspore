@@ -46,6 +46,7 @@ std::shared_ptr<DatasetNode> CocoNode::Copy() {
 void CocoNode::Print(std::ostream &out) const { out << Name(); }
 
 Status CocoNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   RETURN_IF_NOT_OK(ValidateDatasetDirParam("CocoNode", dataset_dir_));
 
   RETURN_IF_NOT_OK(ValidateDatasetSampler("CocoNode", sampler_));
@@ -63,8 +64,8 @@ Status CocoNode::ValidateParams() {
 }
 
 // Function to build CocoNode
-Status CocoNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
-  CocoOp::TaskType task_type;
+Status CocoNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
+  CocoOp::TaskType task_type = CocoOp::TaskType::Detection;
   if (task_ == "Detection") {
     task_type = CocoOp::TaskType::Detection;
   } else if (task_ == "Stuff") {
@@ -73,6 +74,10 @@ Status CocoNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
     task_type = CocoOp::TaskType::Keypoint;
   } else if (task_ == "Panoptic") {
     task_type = CocoOp::TaskType::Panoptic;
+  } else {
+    std::string err_msg = "Task type:'" + task_ + "' is not supported.";
+    MS_LOG(ERROR) << err_msg;
+    RETURN_STATUS_UNEXPECTED(err_msg);
   }
 
   std::unique_ptr<DataSchema> schema = std::make_unique<DataSchema>();

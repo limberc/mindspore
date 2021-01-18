@@ -16,6 +16,7 @@
 
 #include "minddata/dataset/engine/ir/datasetops/map_node.h"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
@@ -54,7 +55,7 @@ void MapNode::Print(std::ostream &out) const {
       << operations_.size() << ",...)";
 }
 
-Status MapNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
+Status MapNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   std::vector<std::shared_ptr<TensorOp>> tensor_ops;
 
   // Build tensorOp from tensorOperation vector
@@ -82,12 +83,15 @@ Status MapNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
 }
 
 Status MapNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   if (operations_.empty()) {
     std::string err_msg = "MapNode: No operation is specified.";
     MS_LOG(ERROR) << err_msg;
     RETURN_STATUS_SYNTAX_ERROR(err_msg);
   }
-
+  for (const auto &op : operations_) {
+    RETURN_IF_NOT_OK(op->ValidateParams());
+  }
   if (!input_columns_.empty()) {
     RETURN_IF_NOT_OK(ValidateDatasetColumnParam("MapNode", "input_columns", input_columns_));
   }
@@ -104,15 +108,48 @@ Status MapNode::ValidateParams() {
 }
 
 // Visitor accepting method for IRNodePass
-Status MapNode::Accept(IRNodePass *p, bool *modified) {
+Status MapNode::Accept(IRNodePass *const p, bool *const modified) {
   // Downcast shared pointer then call visitor
   return p->Visit(shared_from_base<MapNode>(), modified);
 }
 
 // Visitor accepting method for IRNodePass
-Status MapNode::AcceptAfter(IRNodePass *p, bool *modified) {
+Status MapNode::AcceptAfter(IRNodePass *const p, bool *const modified) {
   // Downcast shared pointer then call visitor
   return p->VisitAfter(shared_from_base<MapNode>(), modified);
+}
+
+void MapNode::setOperations(const std::vector<std::shared_ptr<TensorOperation>> &operations) {
+  operations_ = operations;
+}
+std::vector<std::shared_ptr<TensorOperation>> MapNode::operations() { return operations_; }
+
+Status MapNode::to_json(nlohmann::json *out_json) {
+  nlohmann::json args;
+  args["num_parallel_workers"] = num_workers_;
+  args["input_columns"] = input_columns_;
+  args["output_columns"] = output_columns_;
+  if (!project_columns_.empty()) args["column_order"] = project_columns_;
+  if (cache_ != nullptr) {
+    nlohmann::json cache_args;
+    RETURN_IF_NOT_OK(cache_->to_json(&cache_args));
+    args["cache"] = cache_args;
+  }
+
+  std::vector<nlohmann::json> ops;
+  std::vector<int32_t> cbs;
+  nlohmann::json op_args;
+  for (auto op : operations_) {
+    RETURN_IF_NOT_OK(op->to_json(&op_args));
+    op_args["tensor_op_name"] = op->Name();
+    ops.push_back(op_args);
+  }
+  args["operations"] = ops;
+  std::transform(callbacks_.begin(), callbacks_.end(), std::back_inserter(cbs),
+                 [](std::shared_ptr<DSCallback> cb) -> int32_t { return cb->step_size(); });
+  args["callback"] = cbs;
+  *out_json = args;
+  return Status::OK();
 }
 }  // namespace dataset
 }  // namespace mindspore

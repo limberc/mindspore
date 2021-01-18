@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -33,15 +33,15 @@ from .array_ops import (Argmax, Argmin, Cast, Concat, Pack, Unpack,
                         Transpose, TruncatedNormal, TupleToArray, UnsortedSegmentMin, UnsortedSegmentMax,
                         UnsortedSegmentProd, UnsortedSegmentSum, SpaceToDepth, DepthToSpace, SpaceToBatch, BatchToSpace,
                         SpaceToBatchND, BatchToSpaceND, BroadcastTo, InplaceUpdate, ReverseSequence, EmbeddingLookup,
-                        Unique, GatherD, Identity, SequenceMask)
+                        Unique, GatherD, Identity, Range)
 from .comm_ops import (AllGather, AllReduce, _AlltoAll, AllSwap, ReduceScatter, Broadcast,
-                       _MirrorOperator, ReduceOp, _VirtualDataset,
+                       _MirrorOperator, _MirrorMiniStepOperator, ReduceOp, _VirtualDataset,
                        _VirtualDiv, _GetTensorSlice,
                        _HostAllGather, _HostReduceScatter)
 from .debug_ops import (ImageSummary, InsertGradientOf, HookBackward, ScalarSummary,
                         TensorSummary, HistogramSummary, Print, Assert)
 from .control_ops import ControlDepend, GeSwitch, Merge
-from .inner_ops import ScalarCast, Randperm, NoRepeatNGram
+from .inner_ops import ScalarCast, Randperm, NoRepeatNGram, LambApplyOptimizerAssign, LambApplyWeightAssign
 
 from .math_ops import (Abs, ACos, Asin, Asinh, AddN, AccumulateNV2, AssignAdd, AssignSub, Atan2, BatchMatMul, BitwiseAnd, BitwiseOr,
                        BitwiseXor, Inv, Invert, ApproximateEqual, InplaceAdd, InplaceSub,
@@ -54,7 +54,8 @@ from .math_ops import (Abs, ACos, Asin, Asinh, AddN, AccumulateNV2, AssignAdd, A
                        NPUGetFloatStatus, Pow, RealDiv, IsNan, IsInf, IsFinite, FloatStatus,
                        Reciprocal, CumSum, HistogramFixedWidth, SquaredDifference, Xdivy, Xlogy,
                        Sin, Sqrt, Rsqrt, BesselI0e, BesselI1e, TruncateDiv, TruncateMod,
-                       Square, Sub, TensorAdd, Sign, Round, SquareSumAll, Atan, Atanh, Cosh, Sinh, Eps, Tan)
+                       Square, Sub, TensorAdd, Sign, Round, SquareSumAll, Atan, Atanh, Cosh, Sinh, Eps, Tan,
+                       MatrixInverse)
 
 from .random_ops import (RandomChoiceWithMask, StandardNormal, Gamma, Poisson, UniformInt, UniformReal,
                          RandomCategorical, StandardLaplace, Multinomial, UniformCandidateSampler,
@@ -62,8 +63,8 @@ from .random_ops import (RandomChoiceWithMask, StandardNormal, Gamma, Poisson, U
 from .nn_ops import (LSTM, SGD, Adam, FusedSparseAdam, FusedSparseLazyAdam, AdamNoUpdateParam, ApplyMomentum, BatchNorm,
                      BiasAdd, Conv2D,
                      DepthwiseConv2dNative,
-                     DropoutDoMask, Dropout,
-                     DropoutGenMask, Flatten, FusedBatchNorm, FusedBatchNormEx, BNTrainingReduce, BNTrainingUpdate,
+                     DropoutDoMask, Dropout, DropoutGenMask, Flatten,
+                     FusedBatchNorm, FusedBatchNormEx, InstanceNorm, BNTrainingReduce, BNTrainingUpdate,
                      Gelu, FastGelu, Elu,
                      GetNext, L2Normalize, LayerNorm, L2Loss, CTCLoss, CTCGreedyDecoder,
                      LogSoftmax,
@@ -71,7 +72,7 @@ from .nn_ops import (LSTM, SGD, Adam, FusedSparseAdam, FusedSparseLazyAdam, Adam
                      AvgPool, Conv2DBackpropInput, ComputeAccidentalHits,
                      MaxPoolWithArgmax, OneHot, Pad, MirrorPad, PReLU, ReLU, ReLU6, ReLUV2, HSwish, HSigmoid,
                      ResizeBilinear, Sigmoid,
-                     SigmoidCrossEntropyWithLogits,
+                     SigmoidCrossEntropyWithLogits, NLLLoss,
                      SmoothL1Loss, Softmax, Softsign, Softplus, LRN, RNNTLoss, DynamicRNN, DynamicGRUV2,
                      SoftmaxCrossEntropyWithLogits, ROIAlign,
                      SparseSoftmaxCrossEntropyWithLogits, Tanh,
@@ -92,8 +93,8 @@ from ._thor_ops import (CusBatchMatMul, CusCholeskyTrsm, CusFusedAbsMax1, CusImg
                         CusMatMulCubeFraczLeftCast, Im2Col, UpdateThorGradient, Cholesky, CholeskyTrsm, DetTriangle,
                         ProdForceSeA)
 from .sparse_ops import SparseToDense
-from ._cache_ops import (CacheSwapHashmap, SearchCacheIdx, CacheSwapTable, UpdateCache, MapCacheIdx, SubAndFilter,
-                         MapUniform)
+from ._embedding_cache_ops import (CacheSwapHashmap, SearchCacheIdx, CacheSwapTable, UpdateCache, MapCacheIdx, SubAndFilter,
+                                   MapUniform, DynamicAssign, PadAndShift)
 
 __all__ = [
     'Unique',
@@ -129,6 +130,7 @@ __all__ = [
     'MaxPoolWithArgmax',
     'FusedBatchNorm',
     'FusedBatchNormEx',
+    'InstanceNorm',
     'BNTrainingReduce',
     'BNTrainingUpdate',
     'BatchNorm',
@@ -146,6 +148,7 @@ __all__ = [
     'SoftmaxCrossEntropyWithLogits',
     'ROIAlign',
     'SparseSoftmaxCrossEntropyWithLogits',
+    'NLLLoss',
     'SGD',
     'ApplyMomentum',
     'ExpandDims',
@@ -400,7 +403,8 @@ __all__ = [
     "Pull",
     "ReLUV2",
     "SparseToDense",
-    "SequenceMask",
+    "MatrixInverse",
+    "Range",
 ]
 
 __all__.sort()

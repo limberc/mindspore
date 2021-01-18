@@ -24,13 +24,17 @@ using mindspore::schema::PrimitiveType_Conv2D;
 namespace mindspore::kernel {
 int ConvolutionNPUKernel::IsSupport(const std::vector<lite::Tensor *> &inputs,
                                     const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter) {
-  return RET_ERROR;
+  if (conv_param_->group_ != 1) {
+    MS_LOG(WARNING) << "Only support group equals 1 for npu convolution op";
+    return RET_ERROR;
+  }
+  return RET_OK;
 }
 
 int ConvolutionNPUKernel::SetConvParam() {
   conv_->set_attr_strides(ge::AttrValue::LIST_INT({conv_param_->stride_h_, conv_param_->stride_w_}));
   conv_->set_attr_dilations(ge::AttrValue::LIST_INT({conv_param_->dilation_h_, conv_param_->dilation_w_}));
-  conv_->set_attr_groups(1);
+  conv_->set_attr_groups(conv_param_->group_);
 
   if (conv_param_->pad_mode_ == Pad_Same) {
     conv_->set_attr_pad_mode(ge::AttrValue::STR{"SAME"});
@@ -49,34 +53,34 @@ int ConvolutionNPUKernel::SetConvParam() {
 int ConvolutionNPUKernel::SetNPUInputs(const std::vector<lite::Tensor *> &inputs,
                                        const std::vector<lite::Tensor *> &outputs,
                                        const std::vector<ge::Operator *> &npu_inputs) {
-  auto ret = SetPreTranspose(npu_inputs[0]);
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "New pre transpose npu operator (NHWC -> NCHW) for op " << name_ << " failed.";
-    return RET_ERROR;
-  }
-
   // set conv attr param
   conv_ = new (std::nothrow) hiai::op::Convolution(name_ + "_conv");
   if (conv_ == nullptr) {
     MS_LOG(ERROR) << "New convolution operator for convolution op " << name_ << " failed.";
     return RET_ERROR;
   }
-  ret = SetConvParam();
+  auto ret = SetConvParam();
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Set npu op parameter for convolution op " << name_ << " failed.";
     return RET_ERROR;
   }
 
-  ret = InitWeightBiasConst(inputs);
+  ret = InitWeightConst(inputs);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Set weight and bias for convolution op " << name_ << " failed when running npu";
     return RET_ERROR;
   }
   conv_->set_input_filter(*weight_);
+
   if (inputs.size() == 3) {
+    ret = InitBiasConst(inputs);
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "Set bias for convolution op " << name_ << " failed when running npu";
+      return RET_ERROR;
+    }
     conv_->set_input_bias(*bias_);
   }
-  conv_->set_input_x(*pre_trans_);
+  conv_->set_input_x(*npu_inputs[0]);
 
   if (conv_param_->act_type_ != ActType_No) {
     ret = SetActivation(conv_, conv_param_->act_type_);
@@ -85,20 +89,16 @@ int ConvolutionNPUKernel::SetNPUInputs(const std::vector<lite::Tensor *> &inputs
       return RET_ERROR;
     }
   }
-
-  if (conv_param_->act_type_ == ActType_No) {
-    ret = SetPostTranspose(conv_);
-  } else {
-    ret = SetPostTranspose(act_);
-  }
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "New post transpose npu operator (NCHW -> NHWC) for op " << name_ << " failed.";
-    return RET_ERROR;
-  }
   return RET_OK;
 }
 
-ge::Operator *mindspore::kernel::ConvolutionNPUKernel::GetNPUOp() { return post_trans_; }
+ge::Operator *mindspore::kernel::ConvolutionNPUKernel::GetNPUOp() {
+  if (conv_param_->act_type_ == ActType_No) {
+    return conv_;
+  } else {
+    return act_;
+  }
+}
 
 ConvolutionNPUKernel::~ConvolutionNPUKernel() {
   if (conv_ != nullptr) {

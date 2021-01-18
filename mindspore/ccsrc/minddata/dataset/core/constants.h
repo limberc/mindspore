@@ -59,6 +59,9 @@ enum class SPieceTokenizerOutType { kString = 0, kInt = 1 };
 // Possible values for SPieceTokenizerLoadType
 enum class SPieceTokenizerLoadType { kFile = 0, kModel = 1 };
 
+// Possible values for SentencePieceModel
+enum class SentencePieceModel { kUnigram = 0, kBpe = 1, kChar = 2, kWord = 3 };
+
 // Possible values for NormalizeForm
 enum class NormalizeForm {
   kNone = 0,
@@ -84,6 +87,7 @@ constexpr uint32_t kCfgRowsPerBuffer = 1;
 constexpr uint32_t kCfgParallelWorkers = 4;
 constexpr uint32_t kCfgWorkerConnectorSize = 16;
 constexpr uint32_t kCfgOpConnectorSize = 16;
+constexpr int32_t kCfgDefaultRankId = -1;
 constexpr uint32_t kCfgDefaultSeed = std::mt19937::default_seed;
 constexpr uint32_t kCfgMonitorSamplingInterval = 10;
 constexpr uint32_t kCfgCallbackTimeout = 60;  // timeout value for callback in seconds

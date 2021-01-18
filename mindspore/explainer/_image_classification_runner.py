@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -167,7 +167,7 @@ class ImageClassificationRunner:
         if not explainers:
             raise ValueError("Argument explainers is empty.")
 
-        if benchmarkers:
+        if benchmarkers is not None:
             check_value_type("benchmarkers", benchmarkers, list)
             if not all(isinstance(ele, AttributionMetric) for ele in benchmarkers):
                 raise TypeError("Argument benchmarkers is not list of mindspore.explainer.benchmark .")
@@ -199,7 +199,7 @@ class ImageClassificationRunner:
         """
         self._verify_data_n_settings(check_all=True)
 
-        with SummaryRecord(self._summary_dir) as summary:
+        with SummaryRecord(self._summary_dir, raise_exception=True) as summary:
             print("Start running and writing......")
             begin = time()
 

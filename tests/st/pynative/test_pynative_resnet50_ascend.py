@@ -38,7 +38,6 @@ random.seed(1)
 np.random.seed(1)
 ds.config.set_seed(1)
 
-
 grad_by_list = CP.GradOperation(get_by_list=True)
 
 

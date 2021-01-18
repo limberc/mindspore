@@ -30,6 +30,7 @@ namespace dataset {
 RootNode::RootNode(std::shared_ptr<DatasetNode> child) : DatasetNode() {
   // The root node's parent must remain nullptr, which is set in the constructor of DatasetNode.
   AddChild(child);
+  num_epochs_ = 0;
 }
 
 std::shared_ptr<DatasetNode> RootNode::Copy() {
@@ -40,7 +41,7 @@ std::shared_ptr<DatasetNode> RootNode::Copy() {
 
 void RootNode::Print(std::ostream &out) const { out << Name(); }
 
-Status RootNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
+Status RootNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   // root node doesn't build a runtime Op. this function should return Status::Error when called.
   std::string err_msg = "Root node doesn't build a runtime Op";
   MS_LOG(ERROR) << err_msg;
@@ -49,6 +50,7 @@ Status RootNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
 
 // Function to validate the parameters for RootNode
 Status RootNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   if (num_epochs_ <= 0 && num_epochs_ != -1) {
     std::string err_msg =
       "RootNode: num_epochs should be either -1 or positive integer, num_epochs: " + std::to_string(num_epochs_);
@@ -74,13 +76,13 @@ Status RootNode::ValidateParams() {
 }
 
 // Visitor accepting method for IRNodePass
-Status RootNode::Accept(IRNodePass *p, bool *modified) {
+Status RootNode::Accept(IRNodePass *const p, bool *const modified) {
   // Downcast shared pointer then call visitor
   return p->Visit(shared_from_base<RootNode>(), modified);
 }
 
 // Visitor accepting method for IRNodePass
-Status RootNode::AcceptAfter(IRNodePass *p, bool *modified) {
+Status RootNode::AcceptAfter(IRNodePass *const p, bool *const modified) {
   // Downcast shared pointer then call visitor
   return p->VisitAfter(shared_from_base<RootNode>(), modified);
 }

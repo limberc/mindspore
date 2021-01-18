@@ -17,30 +17,22 @@
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_BASE_SWITCH_H_
 
 #include <vector>
+#include "src/runtime/kernel/arm/base/carry_data.h"
 #include "src/lite_kernel.h"
+#include "src/tensorlist.h"
 
 namespace mindspore::kernel {
-
-typedef struct SwitchParameter {
-  OpParameter op_parameter_;
-} SwitchParameter;
-
-class SwitchCPUKernel : public LiteKernel {
+class SwitchCPUKernel : public CarryDataKernel {
  public:
   SwitchCPUKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
                   const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
                   const mindspore::lite::PrimitiveC *primitive)
-      : LiteKernel(parameter, inputs, outputs, ctx, primitive) {
-    switch_param_ = reinterpret_cast<SwitchParameter *>(op_parameter_);
-  }
+      : CarryDataKernel(parameter, inputs, outputs, ctx, primitive) {}
   ~SwitchCPUKernel() override = default;
   int PostProcess() override;
   int Init() override;
   int ReSize() override;
   int Run() override;
-
- private:
-  SwitchParameter *switch_param_ = nullptr;
 };
 }  // namespace mindspore::kernel
 

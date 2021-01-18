@@ -79,6 +79,7 @@ int TensorListStackCPUKernel::MergeElementShape() {
     return RET_ERROR;
   }
   auto ele_shape_data = reinterpret_cast<int *>(in_tensors_[1]->data_c());
+  output_shape_.clear();
   for (int i = 0; i < in_tensors_[1]->ElementsNum(); ++i) {
     output_shape_.push_back(ele_shape_data[i]);
   }
@@ -94,7 +95,7 @@ int TensorListStackCPUKernel::MergeElementShape() {
   }
   if (!IsFullyDefined(input0_->element_shape())) {
     for (int i = 0; i < input0_->ElementsNum(); ++i) {  // get tensorlist every tensor
-      auto tensor_ele = input0_->GetTensorIndex(i);
+      auto tensor_ele = input0_->GetTensor(i);
       MS_ASSERT(tensor_ele != nullptr);
       if (tensor_ele->data_type() != kTypeUnknown) {
         status = MergeSubShape(tensor_ele->shape());
@@ -150,7 +151,7 @@ int TensorListStackCPUKernel::Run() {
   }
   auto out_ptr = reinterpret_cast<float *>(output0_->MutableData());
   for (int i = 0; i < num_element_; ++i) {
-    auto in_ptr = input0_->GetTensorIndex(i);
+    auto in_ptr = input0_->GetTensor(i);
     MS_ASSERT(in_ptr != nullptr);
     if (in_ptr->data_type() != kTypeUnknown) {
       int in_size = in_ptr->ElementsNum();
@@ -166,36 +167,6 @@ int TensorListStackCPUKernel::Run() {
 
 int TensorListStackCPUKernel::ReSize() { return RET_OK; }
 
-kernel::LiteKernel *CpuTensorListStackFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                        const std::vector<lite::Tensor *> &outputs,
-                                                        OpParameter *op_parameter, const lite::InnerContext *ctx,
-                                                        const kernel::KernelKey &desc,
-                                                        const mindspore::lite::PrimitiveC *primitive) {
-  if (op_parameter == nullptr) {
-    MS_LOG(ERROR) << "Input op_parameter is nullptr!";
-    return nullptr;
-  }
-  if (ctx == nullptr) {
-    MS_LOG(ERROR) << "Input context is nullptr!";
-    free(op_parameter);
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_TensorListStack);
-  auto *kernel = new (std::nothrow) TensorListStackCPUKernel(op_parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new TensorListStackCPUKernel fail!";
-    free(op_parameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed! name: " << op_parameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(op_parameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_TensorListStack, CpuTensorListStackFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_TensorListStack, LiteKernelCreator<TensorListStackCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_TensorListStack, LiteKernelCreator<TensorListStackCPUKernel>)
 }  // namespace mindspore::kernel

@@ -26,7 +26,8 @@
 namespace mindspore {
 namespace dataset {
 
-RepeatNode::RepeatNode(std::shared_ptr<DatasetNode> child, int32_t count) : repeat_count_(count) {
+RepeatNode::RepeatNode(std::shared_ptr<DatasetNode> child, int32_t count)
+    : repeat_count_(count), reset_ancestor_(nullptr), op_(nullptr) {
   this->AddChild(child);
 }
 
@@ -35,14 +36,27 @@ std::shared_ptr<DatasetNode> RepeatNode::Copy() {
   return node;
 }
 
-void RepeatNode::Print(std::ostream &out) const { out << Name() + "(count:" + std::to_string(repeat_count_) + ")"; }
+void RepeatNode::Print(std::ostream &out) const { out << Name() + "(count:" + std::to_string(repeat_count_) + ") "; }
 
-Status RepeatNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
-  node_ops->push_back(std::make_shared<RepeatOp>(repeat_count_));
+Status RepeatNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
+  auto new_op = std::make_shared<RepeatOp>(repeat_count_);
+  node_ops->push_back(new_op);
+  op_ = new_op;
+
+  // Add this RepeatOp to its RepeatOp/EpochCtrlOp ancestor's EOE list.
+  // When the ancestor reaches an end-of-epoch boundary, it will send a "reset" signal to all the ops in the EOE list.
+  // The ancestor is updated by GeneratorNodePass post pass.
+  // Assumption:
+  //   We build the run-time ops from IR nodes from top to bottom. Hence Repeat/EpochCtrl ancestor ops are built
+  //   before this leaf Generator op is built.
+  if (reset_ancestor_ != nullptr) {
+    reset_ancestor_->op_->AddToEoeList(new_op);
+  }
   return Status::OK();
 }
 
 Status RepeatNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   if (repeat_count_ <= 0 && repeat_count_ != -1) {
     std::string err_msg = "RepeatNode: repeat_count should be either -1 or positive integer, repeat_count_: " +
                           std::to_string(repeat_count_);
@@ -71,15 +85,22 @@ Status RepeatNode::GetDatasetSize(const std::shared_ptr<DatasetSizeGetter> &size
 }
 
 // Visitor accepting method for IRNodePass
-Status RepeatNode::Accept(IRNodePass *p, bool *modified) {
+Status RepeatNode::Accept(IRNodePass *const p, bool *const modified) {
   // Downcast shared pointer then call visitor
   return p->Visit(shared_from_base<RepeatNode>(), modified);
 }
 
 // Visitor accepting method for IRNodePass
-Status RepeatNode::AcceptAfter(IRNodePass *p, bool *modified) {
+Status RepeatNode::AcceptAfter(IRNodePass *const p, bool *const modified) {
   // Downcast shared pointer then call visitor
   return p->VisitAfter(shared_from_base<RepeatNode>(), modified);
+}
+
+Status RepeatNode::to_json(nlohmann::json *out_json) {
+  nlohmann::json args;
+  args["count"] = repeat_count_;
+  *out_json = args;
+  return Status::OK();
 }
 }  // namespace dataset
 }  // namespace mindspore

@@ -21,7 +21,7 @@ from ..._checkparam import Rel
 from ...communication.management import get_rank, get_group_size, GlobalComm, _get_group
 from ...common import dtype as mstype
 from ..primitive import PrimitiveWithInfer, PrimitiveWithCheck, prim_attr_register
-
+from ...common.api import context
 
 class ReduceOp:
     """
@@ -44,6 +44,12 @@ class ReduceOp:
 
 
 target_dtypes = (mstype.int8, mstype.int32, mstype.float16, mstype.float32)
+
+def check_hcom_group_valid(group):
+    if context.get_context("mode") == context.PYNATIVE_MODE and \
+            context.get_context("device_target") == "Ascend" and \
+            group != GlobalComm.WORLD_COMM_GROUP:
+        raise RuntimeError("Only hccl_world_group is supported in Pynative mode, but got {}".format(group))
 
 class AllReduce(PrimitiveWithInfer):
     """
@@ -103,6 +109,7 @@ class AllReduce(PrimitiveWithInfer):
             raise TypeError("The operation of AllReduce should be str.")
         if not isinstance(_get_group(group), str):
             raise TypeError("The group of AllReduce should be str.")
+        check_hcom_group_valid(group)
         self.op = op
         self.add_prim_attr('group', _get_group(group))
         self.add_prim_attr('fusion', 0)
@@ -142,16 +149,19 @@ class AllGather(PrimitiveWithInfer):
         ``Ascend`` ``GPU``
 
     Examples:
+        >>> # This example should be run with two devices. Refer to the tutorial > Distirbuted Training on mindspore.cn.
+        >>> import numpy as np
         >>> import mindspore.ops.operations as ops
         >>> import mindspore.nn as nn
         >>> from mindspore.communication import init
-        >>> from mindspore import Tensor
+        >>> from mindspore import Tensor, context
         >>>
+        >>> context.set_context(mode=context.GRAPH_MODE)
         >>> init()
         ... class Net(nn.Cell):
         ...     def __init__(self):
         ...         super(Net, self).__init__()
-        ...         self.allgather = ops.AllGather(group="nccl_world_group")
+        ...         self.allgather = ops.AllGather()
         ...
         ...     def construct(self, x):
         ...         return self.allgather(x)
@@ -160,6 +170,10 @@ class AllGather(PrimitiveWithInfer):
         >>> net = Net()
         >>> output = net(input_)
         >>> print(output)
+        [[1. 1. 1. 1. 1. 1. 1. 1.]
+         [1. 1. 1. 1. 1. 1. 1. 1.]
+         [1. 1. 1. 1. 1. 1. 1. 1.]
+         [1. 1. 1. 1. 1. 1. 1. 1.]]
     """
 
     @prim_attr_register
@@ -255,16 +269,18 @@ class ReduceScatter(PrimitiveWithInfer):
         ValueError: If the first dimension of the input cannot be divided by the rank size.
 
     Supported Platforms:
-        ``GPU``
+        ``Ascend`` ``GPU``
 
     Examples:
-        >>> from mindspore import Tensor
+        >>> # This example should be run with two devices. Refer to the tutorial > Distirbuted Training on mindspore.cn.
+        >>> from mindspore import Tensor, context
         >>> from mindspore.communication import init
         >>> from mindspore.ops.operations.comm_ops import ReduceOp
         >>> import mindspore.nn as nn
         >>> import mindspore.ops.operations as ops
         >>> import numpy as np
         >>>
+        >>> context.set_context(mode=context.GRAPH_MODE)
         >>> init()
         >>> class Net(nn.Cell):
         ...     def __init__(self):
@@ -278,6 +294,10 @@ class ReduceScatter(PrimitiveWithInfer):
         >>> net = Net()
         >>> output = net(input_)
         >>> print(output)
+        [[2. 2. 2. 2. 2. 2. 2. 2.]
+         [2. 2. 2. 2. 2. 2. 2. 2.]
+         [2. 2. 2. 2. 2. 2. 2. 2.]
+         [2. 2. 2. 2. 2. 2. 2. 2.]]
     """
 
     @prim_attr_register
@@ -407,6 +427,7 @@ class Broadcast(PrimitiveWithInfer):
     def __init__(self, root_rank, group=GlobalComm.WORLD_COMM_GROUP):
         validator.check_value_type('root_rank', root_rank, (int,), self.name)
         validator.check_value_type('group', _get_group(group), (str,), self.name)
+        check_hcom_group_valid(group)
         self.add_prim_attr('group', _get_group(group))
 
     def infer_shape(self, x_shape):
@@ -534,6 +555,7 @@ class _MirrorOperator(PrimitiveWithInfer):
         self.group = group
         self.dev_num = dev_num
         self.mean_flag = mean_flag
+        self.add_prim_attr("fusion", 1)
 
     def infer_shape(self, x_shape):
         return x_shape
@@ -543,6 +565,35 @@ class _MirrorOperator(PrimitiveWithInfer):
 
 
 mirror = _MirrorOperator()
+
+
+class _MirrorMiniStepOperator(PrimitiveWithInfer):
+    """
+    Auto parallel virtual operator. Do nothing in forward, do all reduce and mean in backward. It is only for
+    internal use of parallel modules and cannot be called by users.
+
+    Args:
+        group (str): The communication group to work on. Default: None.
+        dev_num (int): The device number of the group. Default: None.
+        mean_flag (bool): Whether use mean in backward. Default: None.
+        grad_accumulation_step (int): The grad accumulation step. Default: None.
+    """
+
+    @prim_attr_register
+    def __init__(self, group=None, dev_num=None, mean_flag=None, grad_accumulation_step=None):
+        self.group = group
+        self.dev_num = dev_num
+        self.mean_flag = mean_flag
+        self.grad_accumulation_step = grad_accumulation_step
+
+    def infer_shape(self, x_shape, y_shape, z_shape):
+        return x_shape
+
+    def infer_dtype(self, x_dtype, y_shape, z_shape):
+        return x_dtype
+
+
+mirror_mini_step = _MirrorMiniStepOperator()
 
 
 class _VirtualDiv(PrimitiveWithInfer):

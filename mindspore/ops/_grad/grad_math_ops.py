@@ -420,6 +420,19 @@ def get_bprop_sqrt(self):
     return bprop
 
 
+@bprop_getters.register(G.SqrtGrad)
+def get_bprop_sqrt_grad(self):
+    """Grad definition for `SqrtGrad` operation."""
+
+    def bprop(y, grad, out, dout):
+        gy = dout / y
+        dy = -gy * out
+        dgrad = 0.5 * gy
+        return dy, dgrad
+
+    return bprop
+
+
 @bprop_getters.register(P.Rsqrt)
 def get_bprop_rsqrt(self):
     """Grad definition for `Rsqrt` operation."""
@@ -938,6 +951,19 @@ def get_bprop_asin(self):
     return bprop
 
 
+@bprop_getters.register(G.AsinGrad)
+def get_bprop_asin_grad(self):
+    """Grad definition for `AsinGrad` operation."""
+    input_grad = G.AsinGrad()
+    p_pow = P.Pow()
+
+    def bprop(x, grad, out, dout):
+        d2x = dout * grad * x * p_pow((1 - x * x), - 1.5)
+        ddy = input_grad(x, dout)
+        return (d2x, ddy)
+    return bprop
+
+
 @bprop_getters.register(P.Asinh)
 def get_bprop_asinh(self):
     """Grad definition for `Asinh` operation."""
@@ -946,6 +972,19 @@ def get_bprop_asinh(self):
     def bprop(x, out, dout):
         dx = input_grad(out, dout)
         return (dx,)
+    return bprop
+
+
+@bprop_getters.register(G.AsinhGrad)
+def get_bprop_asinh_grad(self):
+    """Grad definition for `AsinhGrad` operation."""
+    input_grad = G.AsinhGrad()
+    tanh = P.Tanh()
+
+    def bprop(y, grad, out, dout):
+        dy = dout * out * -1.0 * tanh(y)
+        dgrad = input_grad(y, dout)
+        return dy, dgrad
     return bprop
 
 
@@ -986,6 +1025,21 @@ def get_bprop_acos(self):
     return bprop
 
 
+@bprop_getters.register(G.ACosGrad)
+def get_bprop_acos_grad(self):
+    """Grad definition for `ACosGrad` operation."""
+    input_grad = G.ACosGrad()
+    p_pow = P.Pow()
+
+    def bprop(x, grad, out, dout):
+        d2x = -dout * grad * x * p_pow((1 - x * x), - 1.5)
+        ddy = input_grad(x, dout)
+        return (d2x, ddy)
+
+    return bprop
+
+
+
 @bprop_getters.register(P.Acosh)
 def get_bprop_acosh(self):
     """Grad definition for `Acosh` operation."""
@@ -994,6 +1048,20 @@ def get_bprop_acosh(self):
     def bprop(x, out, dout):
         dx = input_grad(out, dout)
         return (dx,)
+
+    return bprop
+
+
+@bprop_getters.register(G.AcoshGrad)
+def get_bprop_acosh_grad(self):
+    """Grad definition for `AcoshGrad` operation."""
+    input_grad = G.AcoshGrad()
+    tanh = P.Tanh()
+
+    def bprop(y, grad, out, dout):
+        dy = dout * out * -1.0 / tanh(y)
+        dgrad = input_grad(y, dout)
+        return dy, dgrad
 
     return bprop
 
@@ -1119,6 +1187,18 @@ def get_bprop_atan(self):
     def bprop(x, out, dout):
         dx = input_grad(x, dout)
         return (dx,)
+    return bprop
+
+
+@bprop_getters.register(G.AtanGrad)
+def get_bprop_atan_grad(self):
+    """Grad definition for `AtanGrad` operation."""
+    input_grad = G.AtanGrad()
+
+    def bprop(x, grad, out, dout):
+        dgrad = input_grad(x, dout)
+        dx = out * dgrad * -2.0 * x
+        return dx, dgrad
     return bprop
 
 

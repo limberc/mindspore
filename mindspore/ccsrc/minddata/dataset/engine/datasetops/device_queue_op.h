@@ -171,7 +171,7 @@ class DeviceQueueOp : public PipelineOp {
   // @param p - Pointer to the NodePass to be accepted.
   // @param modified - Whether this node visit modified the pipeline.
   // @return - Status of the node visit.
-  Status Accept(NodePass *p, bool *modified) override;
+  Status Accept(NodePass *p, bool *const modified) override;
 
   // Op name getter
   // @return Name of the current Op
@@ -217,6 +217,7 @@ class DeviceQueueOp : public PipelineOp {
   int32_t total_batch_;
   bool create_data_info_queue_;
   std::unique_ptr<DATA_INFO_QUEUE> data_info_queue_ptr_;
+  std::mutex data_info_mutex_;
 
 #ifdef ENABLE_TDTQUE
   std::shared_ptr<TdtPlugin> tdtInstancePtr;

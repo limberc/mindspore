@@ -143,16 +143,26 @@ class ConfigManager {
   /// \param prefetch_size
   void set_prefetch_size(int32_t prefetch_size);
 
+  /// setter function
+  /// \param numa_switch
+  void set_numa_enable(bool numa_enable);
+
+  /// getter function
+  /// Now we want to seperate the numa link to _c_dataengine in the CMakeLists,
+  /// so we want user to choose whether to open numa switch.
+  /// @return Get the current numa switch state.
+  bool numa_enable() const { return numa_enable_; }
+
   // getter function
   // This rank_id is for numa and device_queue, one process work with only one rank_id
   // for standalone scenario, this rank_id may come from env 'CUDA_VISIBLE_DEVICES',
   // but for distribute scenario, this rank_id come from _get_global_rank() in python
   // @return Get the current device id, for one process, it's only with one rank_id.
-  uint32_t rank_id() const { return rank_id_; }
+  int32_t rank_id() const { return rank_id_; }
 
   // setter function
   // @param rank_id - Set the current device id
-  void set_rank_id(uint32_t rank_id);
+  void set_rank_id(int32_t rank_id);
 
   uint32_t seed() const;
 
@@ -210,13 +220,14 @@ class ConfigManager {
   // This rank_id is for numa and device_queue, one process work with only one rank_id,
   // for standalone scenario, this rank_id may come from env 'CUDA_VISIBLE_DEVICES',
   // but for distribute scenario, this rank_id come from _get_global_rank() in python
-  uint32_t rank_id_;
+  int32_t rank_id_;
   uint32_t seed_;
   uint32_t monitor_sampling_interval_;
   uint32_t callback_timout_;
   std::string cache_host_;
   int32_t cache_port_;
   int32_t num_connections_;
+  bool numa_enable_;
   int32_t prefetch_size_;
   bool auto_num_workers_;
   const int32_t num_cpu_threads_;

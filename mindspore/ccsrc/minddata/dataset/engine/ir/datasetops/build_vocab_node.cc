@@ -50,7 +50,7 @@ void BuildVocabNode::Print(std::ostream &out) const {
 }
 
 // Function to build BuildVocabNode
-Status BuildVocabNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
+Status BuildVocabNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   std::shared_ptr<BuildVocabOp> build_vocab_op;
   build_vocab_op = std::make_shared<BuildVocabOp>(vocab_, columns_, freq_range_, top_k_, special_tokens_,
                                                   special_first_, num_workers_, connector_que_size_);
@@ -59,6 +59,7 @@ Status BuildVocabNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) 
 }
 
 Status BuildVocabNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   if (vocab_ == nullptr) {
     std::string err_msg = "BuildVocabNode: vocab is null.";
     MS_LOG(ERROR) << err_msg;
@@ -86,13 +87,13 @@ Status BuildVocabNode::ValidateParams() {
 }
 
 // Visitor accepting method for IRNodePass
-Status BuildVocabNode::Accept(IRNodePass *p, bool *modified) {
+Status BuildVocabNode::Accept(IRNodePass *const p, bool *const modified) {
   // Downcast shared pointer then call visitor
   return p->Visit(shared_from_base<BuildVocabNode>(), modified);
 }
 
 // Visitor accepting method for IRNodePass
-Status BuildVocabNode::AcceptAfter(IRNodePass *p, bool *modified) {
+Status BuildVocabNode::AcceptAfter(IRNodePass *const p, bool *const modified) {
   // Downcast shared pointer then call visitor
   return p->VisitAfter(shared_from_base<BuildVocabNode>(), modified);
 }

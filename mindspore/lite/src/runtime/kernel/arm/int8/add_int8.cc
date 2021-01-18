@@ -15,10 +15,7 @@
  */
 
 #include "src/runtime/kernel/arm/int8/add_int8.h"
-#include <limits>
-#include <algorithm>
-#include "nnacl/arithmetic_common.h"
-#include "nnacl/quantization/quantize.h"
+#include "nnacl/int8/quantize.h"
 #include "src/runtime/runtime_api.h"
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
@@ -143,7 +140,9 @@ void QuantizedAddCPUKernel::BroadcastRun(int task_id) {
   if (real_out_count <= 0) {
     return;
   }
-  int8_t *cur_in0, *cur_in1, *cur_out;
+  int8_t *cur_in0 = nullptr;
+  int8_t *cur_in1 = nullptr;
+  int8_t *cur_out = nullptr;
   for (int i = 0; i < real_out_count; i++) {
     if (arith_para_->in_elements_num0_ == arith_para_->out_elements_num_) {
       cur_in0 = input0_data_ + task_id * stride * in_size_ + i * in_size_;
@@ -154,7 +153,11 @@ void QuantizedAddCPUKernel::BroadcastRun(int task_id) {
       cur_in1 = input1_data_ + task_id * stride * in_size_ + i * in_size_;
       cur_out = output_data_ + task_id * stride * in_size_ + i * in_size_;
     }
+#ifdef ENABLE_AVX
+    AddInt8_AVX2(cur_in0, cur_in1, cur_out, in_size_, &para_);
+#else
     AddInt8(cur_in0, cur_in1, cur_out, in_size_, &para_);
+#endif
   }
   return;
 }
@@ -181,9 +184,17 @@ int QuantizedAddCPUKernel::DoExecute(int task_id) {
     int8_t element_in = arith_para_->in_elements_num0_ == 1 ? input0_data_[0] : input1_data_[0];
     AddQuantQrgs *ptr_args = arith_para_->in_elements_num0_ == 1 ? &para_.in1_args_ : &para_.in0_args_;
     AddQuantQrgs *ele_args = arith_para_->in_elements_num0_ == 1 ? &para_.in0_args_ : &para_.in1_args_;
+#ifdef ENABLE_AVX
+    AddOptInt8_AVX2(ptr_in, element_in, cur_out, rest_count, &para_, ptr_args, ele_args);
+#else
     AddOptInt8(ptr_in, element_in, cur_out, rest_count, &para_, ptr_args, ele_args);
+#endif
   } else {
+#ifdef ENABLE_AVX
+    AddInt8_AVX2(cur_in0, cur_in1, cur_out, rest_count, &para_);
+#else
     AddInt8(cur_in0, cur_in1, cur_out, rest_count, &para_);
+#endif
   }
 
   return RET_OK;
@@ -199,35 +210,5 @@ int QuantizedAddCPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuAddInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                            const std::vector<lite::Tensor *> &outputs, OpParameter *parameter,
-                                            const lite::InnerContext *ctx, const KernelKey &desc,
-                                            const mindspore::lite::PrimitiveC *primitive) {
-  if (parameter == nullptr) {
-    MS_LOG(ERROR) << "parameter is nullptr";
-    return nullptr;
-  }
-  if (ctx == nullptr) {
-    MS_LOG(ERROR) << "ctx is nullptr";
-    free(parameter);
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == PrimitiveType_Add);
-  auto *kernel = new (std::nothrow) QuantizedAddCPUKernel(parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "kernel is nullptr.";
-    free(parameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << parameter->name_
-                  << ", type: " << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(parameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Add, CpuAddInt8KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Add, LiteKernelCreator<QuantizedAddCPUKernel>)
 }  // namespace mindspore::kernel

@@ -44,6 +44,7 @@ class LstmCPUKernel : public LiteKernel {
   int InitWeightBias();
 
   float *gate_buffer_ = nullptr;
+  float *state_buffer_ = nullptr;
   float *weight_i_ptr_ = nullptr;
   float *weight_h_ptr_ = nullptr;
   float *bias_ptr_ = nullptr;

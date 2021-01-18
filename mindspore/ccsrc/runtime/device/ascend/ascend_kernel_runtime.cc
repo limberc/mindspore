@@ -22,6 +22,7 @@
 #include <exception>
 #include <algorithm>
 #include <thread>
+#include "runtime/device/ascend/signal_util.h"
 #include "debug/data_dump/e2e_dump_util.h"
 #include "runtime/device/ascend/ascend_device_address.h"
 #include "runtime/device/cpu/mpi/mpi_interface.h"
@@ -45,6 +46,8 @@
 #include "toolchain/adx_datadump_server.h"
 #include "utils/shape_utils.h"
 #include "utils/trace_base.h"
+#include "graphengine/inc/external/acl/error_codes/rt_error_codes.h"
+#include "debug/anf_ir_dump.h"
 #ifdef MEM_REUSE_DEBUG
 #include "backend/optimizer/mem_reuse/mem_reuse_checker.h"
 #endif
@@ -54,7 +57,12 @@
 #include "utils/config_manager.h"
 #include "runtime/device/ascend/profiling/reporter/op_name_task_stream_reporter.h"
 #include "runtime/hccl_adapter/hccl_adapter.h"
+#include "runtime/device/ascend/profiling/profiling_callback_register.h"
 #include "backend/kernel_compiler/hccl/hccl_context.h"
+#ifdef ENABLE_TDTQUE
+#include "tdt/tdt_host_interface.h"
+#include "tdt/status.h"
+#endif
 
 using ge::model_runner::ModelRunner;
 using mindspore::device::ascend::ProfilingManager;
@@ -67,11 +75,9 @@ constexpr uint32_t kTupleTaskId = 0;
 constexpr uint32_t kTupleStreamId = 1;
 constexpr uint32_t kTupleArgs = 2;
 constexpr uint32_t kProfilingMaxTaskIdInStream = 65531;
+constexpr auto kModuleName = "MindSpore";
 
-namespace mindspore {
-namespace device {
-namespace ascend {
-static const size_t PRAMATER_OUTPUT_INDEX = 0;
+namespace mindspore::device::ascend {
 static thread_local rtContext_t thread_local_rt_context{nullptr};
 namespace {
 std::string GetRankId() {
@@ -106,7 +112,9 @@ std::string GetRankId() {
 }
 }  // namespace
 
-std::vector<rtExceptionInfo> AscendKernelRuntime::exception_infoes_;
+std::vector<rtTaskFailInfo> AscendKernelRuntime::task_fail_infoes_ = {};
+uint32_t AscendKernelRuntime::current_graph_id_ = 0;
+std::map<std::string, uint32_t> AscendKernelRuntime::overflow_tasks_;
 AscendKernelRuntime::~AscendKernelRuntime() { graph_model_map_.clear(); }
 
 void AscendKernelRuntime::SetContext() {
@@ -251,11 +259,23 @@ void AscendKernelRuntime::ReleaseDeviceRes() {
     mem_manager_->FreeDeviceMemory();
   }
 
+  auto rt_ret = rtRegTaskFailCallbackByModule(kModuleName, nullptr);
+  if (rt_ret != RT_ERROR_NONE) {
+    MS_LOG(EXCEPTION) << "Reg SetTaskFailCallback failed, error: " << rt_ret;
+  }
+
   (void)DestroySingleOpHccl();
   (void)DestroyHccl();
   (void)ResetDevice(device_id);
   (void)ProfilingManager::GetInstance().StopProfiling();
   MS_LOG(INFO) << "Ascend finalize end";
+}
+
+void AscendKernelRuntime::PreInit() {
+  auto ret = ProfilingManager::GetInstance().StartupProfiling(device_id_);
+  if (!ret) {
+    MS_EXCEPTION(DeviceProcessError) << "StartupProfiling failed.";
+  }
 }
 
 bool AscendKernelRuntime::Init() {
@@ -265,24 +285,21 @@ bool AscendKernelRuntime::Init() {
   }
   OpTilingCalculater::GetInstance().Init();
   // Start up profiling before rtSetDevice
-  bool ret = ProfilingManager::GetInstance().StartupProfiling(device_id_);
-  if (!ret) {
-    MS_EXCEPTION(DeviceProcessError) << "StartupProfiling failed.";
-  }
 
-  ret = InitDevice();
+  bool ret = InitDevice();
   if (!ret) {
     return ret;
   }
+
   SetDebugger();
   mem_manager_ = std::make_shared<AscendMemoryManager>();
   MS_EXCEPTION_IF_NULL(mem_manager_);
   mem_manager_->MallocDeviceMemory();
 
   // Set callback func when exception error
-  auto rt_ret = rtSetTaskFailCallback(ExceptionCallback);
+  auto rt_ret = rtRegTaskFailCallbackByModule(kModuleName, TaskFailCallback);
   if (rt_ret != RT_ERROR_NONE) {
-    MS_LOG(EXCEPTION) << "SetTaskFailCallback failed, error: " << rt_ret;
+    MS_LOG(EXCEPTION) << "Reg SetTaskFailCallback failed, error: " << rt_ret;
   }
 
   initialized_ = true;
@@ -293,7 +310,7 @@ bool AscendKernelRuntime::LoadData(mindspore::session::KernelGraph *graph) {
   MS_EXCEPTION_IF_NULL(graph);
 #ifdef ENABLE_DEBUGGER
   MS_LOG(INFO) << "Start load step";
-  for (auto graph_ptr : debugger_->GetGraphPtrList()) {
+  for (const auto &graph_ptr : debugger_->GetGraphPtrList()) {
     debugger_->SetGraphPtr(graph_ptr);
     // load output
     debugger_->LoadGraphOutputs();
@@ -521,53 +538,72 @@ void AscendKernelRuntime::LaunchDataDump(GraphId graph_id) {
   }
 }
 
-void AscendKernelRuntime::ExceptionCallback(rtExceptionInfo *exception_info) {
+void AscendKernelRuntime::TaskFailCallback(rtTaskFailInfo *task_fail_info) {
+  MS_EXCEPTION_IF_NULL(task_fail_info);
   static std::mutex exception_mutex;
   std::lock_guard<std::mutex> lock(exception_mutex);
-  exception_infoes_.push_back(*exception_info);
+  if (task_fail_info->retcode == ACL_ERROR_RT_AICORE_OVER_FLOW) {
+    auto key = std::to_string(task_fail_info->streamid) + std::to_string(task_fail_info->taskid);
+    if (overflow_tasks_.find(key) == overflow_tasks_.end()) {
+      overflow_tasks_[key] = 1;
+    }
+    if (overflow_tasks_[key] == 5) {
+      auto node_name = AscendKernelRuntime::GetErrorNodeName(task_fail_info->streamid, task_fail_info->taskid);
+      MS_LOG(WARNING) << "Node run task overflow, node name: " << node_name;
+      overflow_tasks_[key] = 0;
+    } else {
+      overflow_tasks_[key]++;
+    }
+  } else {
+    MS_LOG(WARNING) << "Task fail infos task_id: " << task_fail_info->taskid
+                    << ", stream_id: " << task_fail_info->streamid << ", tid: " << task_fail_info->tid
+                    << ", device_id: " << task_fail_info->deviceid << ", retcode: " << task_fail_info->retcode;
+    task_fail_infoes_.push_back(*task_fail_info);
+  }
+}
+
+string AscendKernelRuntime::GetErrorNodeName(uint32_t streamid, uint32_t taskid) {
+  auto runtime_info_map = ModelRunner::Instance().GetRuntimeInfoMap(AscendKernelRuntime::current_graph_id_);
+  for (const auto &iter : runtime_info_map) {
+    auto task_id = std::get<kTupleTaskId>(*iter.second);
+    auto stream_id = std::get<kTupleStreamId>(*iter.second);
+    if (task_id == taskid && stream_id == streamid) {
+      MS_LOG(ERROR) << "Node: " << iter.first << ", run task error.";
+      return iter.first;
+    }
+  }
+  return "";
 }
 
 void AscendKernelRuntime::DumpTaskExceptionInfo(const session::KernelGraph *graph) {
   MS_EXCEPTION_IF_NULL(graph);
-  std::vector<std::string> full_scope_name{};
-  // Find node name(full scope name)
-  auto runtime_info_map = ModelRunner::Instance().GetRuntimeInfoMap(graph->graph_id());
-  MS_LOG(ERROR) << "Exception_infos_ size: " << exception_infoes_.size() << ". first example: "
-                << ", task_id: " << exception_infoes_.at(0).taskid
-                << ", stream_id: " << exception_infoes_.at(0).streamid << ", tid: " << exception_infoes_.at(0).tid
-                << ", device_id: " << exception_infoes_.at(0).deviceid;
-
-  for (const auto &exception_info : exception_infoes_) {
-    for (const auto &iter : runtime_info_map) {
-      auto task_id = std::get<kTupleTaskId>(*iter.second);
-      auto stream_id = std::get<kTupleStreamId>(*iter.second);
-      if (task_id == exception_info.taskid && stream_id == exception_info.streamid) {
-        full_scope_name.push_back(iter.first);
-        MS_LOG(ERROR) << "Node: " << iter.first << ", run task error.";
-      }
+  const std::string local_path = std::string("./task_error_dump/") + std::to_string(task_fail_infoes_.at(0).deviceid);
+  for (const auto &task_fail_info : task_fail_infoes_) {
+    auto full_scope_name = AscendKernelRuntime::GetErrorNodeName(task_fail_info.streamid, task_fail_info.taskid);
+    // Dump error data in local path
+    if (full_scope_name.empty()) {
+      continue;
     }
-  }
-  // Dump error data in local path
-  const std::string local_path = std::string("./task_error_dump/") + std::to_string(exception_infoes_.at(0).deviceid);
-  for (const auto &node : graph->execution_order()) {
-    for (auto &name : full_scope_name) {
-      if (node->fullname_with_scope() == name) {
-        MS_LOG(ERROR) << "Begin to dump node (" << name << ") task error input/output data in local path."
+    for (const auto &node : graph->execution_order()) {
+      if (node->fullname_with_scope() == full_scope_name) {
+        MS_LOG(ERROR) << "Dump node (" << full_scope_name << ") task error input/output data to: " << local_path
                       << " trace: " << trace::DumpSourceLines(node);
-        E2eDumpUtil::DumpInputImpl(node, false, local_path, &name, nullptr);
-        E2eDumpUtil::DumpOutputImpl(node, false, local_path, &name, nullptr);
+        E2eDumpUtil::DumpInputImpl(node, false, local_path, &full_scope_name, nullptr);
+        E2eDumpUtil::DumpOutputImpl(node, false, local_path, &full_scope_name, nullptr);
       }
     }
   }
 }
 
 bool AscendKernelRuntime::Run(session::KernelGraph *graph, bool is_task_sink) {
+  SignalGuard sg;
   MS_EXCEPTION_IF_NULL(graph);
   bool ret = false;
 #if defined(_WIN32) || defined(_WIN64)
   auto start_time = std::chrono::steady_clock::now();
 #else
-  struct timeval start_time, end_time;
+  struct timeval start_time {};
+  struct timeval end_time {};
   (void)gettimeofday(&start_time, nullptr);
 #endif
   if (is_task_sink) {
@@ -626,6 +662,7 @@ bool AscendKernelRuntime::RunDynamicKernelAsync(const session::KernelGraph *grap
 }
 
 bool AscendKernelRuntime::RunTask(const session::KernelGraph *graph) {
+  current_graph_id_ = graph->graph_id();
   InnerSetContext();
   MS_EXCEPTION_IF_NULL(graph);
   if (graph->is_dynamic_shape()) {
@@ -652,14 +689,31 @@ bool AscendKernelRuntime::RunTask(const session::KernelGraph *graph) {
   bool status = ModelRunner::Instance().RunModel(graph->graph_id(), input_tensors, output_tensors);
   if (!status) {
     DumpTaskExceptionInfo(graph);
+    std::string file_name = "task_error_debug" + std::to_string(current_graph_id_) + ".ir";
+    auto graph_tmp = std::make_shared<session::KernelGraph>(*graph);
+    DumpIR(file_name, graph_tmp);
+#ifdef ENABLE_TDTQUE
+    // Run task error, we should call TdtHostDestroy to release tdt to avoid DeviceQueueOp hostPush hung
+    // case1: cpu usage 100% cause thread/process exit, but some tdt thread remain in backend
+    int32_t destory_status = tdt::TdtHostDestroy();
+    if (destory_status != TDT_OK_CODE) {
+      MS_LOG(WARNING) << "Destroy tsd failed, status = " << destory_status << ".";
+    } else {
+      MS_LOG(INFO) << "Destroy tsd success.";
+    }
+#endif
     return false;
   }
-  exception_infoes_.clear();
+  task_fail_infoes_.clear();
   return true;
 }
 
 bool AscendKernelRuntime::SyncStream() {
   InnerSetContext();
+  if (stream_ == nullptr) {
+    MS_LOG(ERROR) << "SyncStream failed. stream_ is nullptr";
+    return false;
+  }
   if (RT_ERROR_NONE != rtStreamSynchronize(stream_)) {  // o for switch stream
     MS_LOG(ERROR) << "Call runtime rtStreamSynchronize error.";
     return false;
@@ -841,6 +895,4 @@ void AscendKernelRuntime::KernelLaunchProfiling(const std::string &kernel_name) 
     MS_LOG(EXCEPTION) << "Too many profiling data";
   }
 }
-}  // namespace ascend
-}  // namespace device
-}  // namespace mindspore
+}  // namespace mindspore::device::ascend

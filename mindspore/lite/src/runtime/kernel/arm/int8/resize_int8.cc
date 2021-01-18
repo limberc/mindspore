@@ -86,8 +86,8 @@ int ResizeInt8CPUKernel::Init() {
   quant_out_->zp_ = output->quant_params().front().zeroPoint;
   quant_out_->scale_ = output->quant_params().front().scale;
 
-  QuantizeRoundParameter(quant_in_->scale_ / quant_out_->scale_, &multiplier_->multiplier_, &multiplier_->left_shift_,
-                         &multiplier_->right_shift_);
+  QuantizeRoundParameterWithDoublePrecision(quant_in_->scale_ / quant_out_->scale_, &multiplier_->multiplier_,
+                                            &multiplier_->left_shift_, &multiplier_->right_shift_);
   if (!InferShapeDone()) {
     return RET_OK;
   }
@@ -138,10 +138,11 @@ int ResizeInt8CPUKernel::CalRatio() {
   auto out_height = out_tensor->Height();
   resize_quant_arg_.ratio_x_ = ((1 << 10) * in_width + out_width / 2) / out_width;
   resize_quant_arg_.ratio_y_ = ((1 << 10) * in_height + out_height / 2) / out_height;
-  if (align_corners_ && out_width > 1) {
+  bool align_corners = coordinate_transform_mode_ == schema::CoordinateTransformMode_ALIGN_CORNERS;
+  if (align_corners && out_width > 1) {
     resize_quant_arg_.ratio_x_ = ((1 << 10) * (in_width - 1) + (out_width - 1) / 2) / (out_width - 1);
   }
-  if (align_corners_ && out_height > 1) {
+  if (align_corners && out_height > 1) {
     resize_quant_arg_.ratio_y_ = ((1 << 10) * (in_height - 1) + (out_height - 1) / 2) / (out_height - 1);
   }
   return RET_OK;
@@ -207,10 +208,11 @@ int ResizeInt8CPUKernel::CalFloatRatio() {
   auto out_height = out_tensor->Height();
   resize_float_quant_arg_.ratio_x_ = static_cast<float>(in_width) / out_width;
   resize_float_quant_arg_.ratio_y_ = static_cast<float>(in_height) / out_height;
-  if (align_corners_ && out_width > 1) {
+  bool align_corners = coordinate_transform_mode_ == schema::CoordinateTransformMode_ALIGN_CORNERS;
+  if (align_corners && out_width > 1) {
     resize_float_quant_arg_.ratio_x_ = static_cast<float>(in_width - 1) / (out_width - 1);
   }
-  if (align_corners_ && out_height > 1) {
+  if (align_corners && out_height > 1) {
     resize_float_quant_arg_.ratio_y_ = static_cast<float>(in_height - 1) / (out_height - 1);
   }
   return RET_OK;
@@ -335,14 +337,15 @@ int ResizeInt8CPUKernel::RunImpl(int task_id) {
     case static_cast<int>(schema::ResizeMethod_NEAREST): {
       bool same_zp = quant_in_->zp_ == quant_out_->zp_;
       bool same_scale = abs(quant_out_->scale_ - quant_in_->scale_) < 1e-6;
+      bool align_corners = coordinate_transform_mode_ == schema::CoordinateTransformMode_ALIGN_CORNERS;
       if (same_zp && same_scale) {
         ret =
           ResizeNearestNeighborInt8Simple(input_data, output_data, input_shape.data(), out_tensors_[0]->shape().data(),
-                                          align_corners_, task_id, context_->thread_num_);
+                                          align_corners, task_id, context_->thread_num_);
       } else {
         ret =
           ResizeNearestNeighborInt8(input_data, output_data, input_shape.data(), out_tensors_[0]->shape().data(),
-                                    align_corners_, multiplier_, quant_in_, quant_out_, task_id, context_->thread_num_);
+                                    align_corners, multiplier_, quant_in_, quant_out_, task_id, context_->thread_num_);
       }
       break;
     }
@@ -363,31 +366,6 @@ int ResizeInt8CPUKernel::Run() {
   }
   return RET_OK;
 }
-kernel::LiteKernel *CpuResizeInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                               const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                               const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                               const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Input opParameter is nullptr!";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_Resize);
-  auto *kernel = new (std::nothrow) ResizeInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new ResizeCPUKernel fail!";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
 
-  return kernel;
-}
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Resize, CpuResizeInt8KernelCreator)
-
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Resize, LiteKernelCreator<ResizeInt8CPUKernel>)
 }  // namespace mindspore::kernel

@@ -25,7 +25,7 @@ int Executor::CheckInputs(const std::vector<Tensor *> &in_tensors) {
       MS_LOG(ERROR) << "Graph input tensor is nullptr";
       return RET_ERROR;
     }
-    if (inTensor->data_c() == nullptr) {
+    if (inTensor->data_type() != kObjectTypeTensorType && inTensor->data_c() == nullptr) {
       MS_LOG(ERROR) << "Graph input tensor data is nullptr " << in_tensors;
       return RET_ERROR;
     }
@@ -48,6 +48,12 @@ int Executor::Run(std::vector<Tensor *> &in_tensors, std::vector<Tensor *> &out_
   if (RET_OK != ret) {
     MS_LOG(ERROR) << "CheckInputs failed";
     return ret;
+  }
+  // clear ref_count
+  for (auto *kernel : kernels) {
+    for (auto *tensor : kernel->in_tensors()) {
+      tensor->set_ref_count(0);
+    }
   }
   std::queue<kernel::LiteKernel *> kernel_queue;
   for (auto kernel : kernels) {

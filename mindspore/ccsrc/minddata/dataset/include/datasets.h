@@ -17,6 +17,7 @@
 #ifndef MINDSPORE_CCSRC_MINDDATA_DATASET_INCLUDE_DATASETS_H_
 #define MINDSPORE_CCSRC_MINDDATA_DATASET_INCLUDE_DATASETS_H_
 
+#include <sys/stat.h>
 #include <unistd.h>
 #include <map>
 #include <memory>
@@ -26,27 +27,18 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include "minddata/dataset/engine/ir/cache/dataset_cache.h"
 
-#include "minddata/dataset/core/constants.h"
-#include "minddata/dataset/engine/consumers/tree_consumer.h"
-#include "minddata/dataset/engine/ir/datasetops/dataset_node.h"
 #include "minddata/dataset/include/iterator.h"
 #include "minddata/dataset/include/samplers.h"
 #include "minddata/dataset/include/tensor.h"
+#include "minddata/dataset/include/text.h"
 #include "minddata/dataset/include/type_id.h"
-#include "minddata/dataset/kernels/c_func_op.h"
-#include "minddata/dataset/kernels/tensor_op.h"
-#include "minddata/dataset/util/path.h"
-#ifndef ENABLE_ANDROID
-#include "minddata/dataset/text/sentence_piece_vocab.h"
-#include "minddata/dataset/text/vocab.h"
-#endif
 
 namespace mindspore {
 namespace dataset {
 
 class Tensor;
+class TensorRow;
 class TensorShape;
 class TreeAdapter;
 class TreeGetters;
@@ -54,6 +46,7 @@ class TreeGetters;
 class Vocab;
 #endif
 
+class DatasetCache;
 class DatasetNode;
 
 class Iterator;
@@ -77,12 +70,20 @@ class ConcatDataset;
 class RenameDataset;
 #endif
 
+#ifndef ENABLE_ANDROID
+class SentencePieceVocab;
+enum class SentencePieceModel;
+#endif
+
+class DSCallback;
+
 class RepeatDataset;
 
 #ifndef ENABLE_ANDROID
 class SkipDataset;
 class TakeDataset;
 class ZipDataset;
+
 #endif
 
 /// \class Dataset datasets.h
@@ -140,8 +141,10 @@ class Dataset : public std::enable_shared_from_this<Dataset> {
 
   /// \brief Function to create an Iterator over the Dataset pipeline
   /// \param[in] columns List of columns to be used to specify the order of columns
+  /// \param[in] num_epochs Number of epochs to run through the pipeline, default -1 which means infinite epochs.
+  ///     An empty row is returned at the end of each epoch
   /// \return Shared pointer to the Iterator
-  std::shared_ptr<Iterator> CreateIterator(std::vector<std::string> columns = {});
+  std::shared_ptr<Iterator> CreateIterator(std::vector<std::string> columns = {}, int32_t num_epochs = -1);
 
 #ifndef ENABLE_ANDROID
   /// \brief Function to transfer data through a device.
@@ -224,7 +227,7 @@ class Dataset : public std::enable_shared_from_this<Dataset> {
   /// \brief Function to create a SentencePieceVocab from source dataset
   /// \notes Build a SentencePieceVocab from a dataset.
   /// \param[in] col_names Column names to get words from. It can be a vector of column names
-  /// \param[in] vocab_size Vocabulary size. The type is uint32
+  /// \param[in] vocab_size Vocabulary size.
   /// \param[in] character_coverage Percentage of characters covered by the model, must be between
   ///     0.98 and 1.0 Good defaults are: 0.9995 for languages with rich character sets like
   ///     Japanese or Chinese character sets, and 1.0 for other languages with small character sets.
@@ -232,7 +235,7 @@ class Dataset : public std::enable_shared_from_this<Dataset> {
   ///     The input sentence must be pretokenized when using word type.
   /// \param[in] params A vector contains more option parameters of sentencepiece library
   std::shared_ptr<SentencePieceVocab> BuildSentencePieceVocab(
-    const std::vector<std::string> &col_names, uint32_t vocab_size, float character_coverage,
+    const std::vector<std::string> &col_names, int32_t vocab_size, float character_coverage,
     SentencePieceModel model_type, const std::unordered_map<std::string, std::string> &params);
 
   /// \brief Function to create a Vocab from source dataset
@@ -504,6 +507,7 @@ class RenameDataset : public Dataset {
  public:
   RenameDataset(std::shared_ptr<Dataset> input, const std::vector<std::string> &input_columns,
                 const std::vector<std::string> &output_columns);
+  ~RenameDataset() = default;
 };
 #endif
 
@@ -968,8 +972,12 @@ std::shared_ptr<TFRecordDataset> TFRecord(const std::vector<std::string> &datase
   } else {
     std::string schema_path = schema;
     if (!schema_path.empty()) {
-      Path schema_file(schema_path);
-      if (!schema_file.Exists()) {
+      struct stat sb;
+      int rc = stat(common::SafeCStr(schema_path), &sb);
+      if (rc == -1 && errno != ENOENT) {
+        MS_LOG(WARNING) << "Unable to query the status of [" << schema_path << "]. Errno = " << errno << ".";
+      }
+      if (rc != 0) {
         MS_LOG(ERROR) << "TFRecordDataset: schema path [" << schema_path << "] is invalid or does not exist.";
         return nullptr;
       }
@@ -1011,7 +1019,8 @@ std::shared_ptr<VOCDataset> VOC(const std::string &dataset_dir, const std::strin
 
 /// \brief Function the create a cache to be attached to a dataset
 /// \param id A user assigned session id for the current pipeline.
-/// \param mem_sz Size of the memory set aside for the row caching (default=0 which means unlimited).
+/// \param mem_sz Size of the memory set aside for the row caching (default=0 which means unlimited,
+///     note that it might bring in the risk of running out of memory on the machine).
 /// \param spill Spill to disk if out of memory (default=False).
 /// \param hostname optional host name (default="127.0.0.1").
 /// \param port optional port (default=50052).

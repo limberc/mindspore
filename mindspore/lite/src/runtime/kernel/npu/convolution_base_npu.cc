@@ -16,6 +16,7 @@
 
 #include "src/runtime/kernel/npu/convolution_base_npu.h"
 #include "src/runtime/agent/npu/npu_converter_utils.h"
+#include "nnacl/pack.h"
 
 namespace mindspore::kernel {
 ConvolutionBaseNPUKernel::~ConvolutionBaseNPUKernel() {
@@ -33,21 +34,37 @@ ConvolutionBaseNPUKernel::~ConvolutionBaseNPUKernel() {
   }
 }
 
-int ConvolutionBaseNPUKernel::InitWeightBiasConst(const std::vector<lite::Tensor *> &inputs) {
+int ConvolutionBaseNPUKernel::InitWeightConst(const std::vector<lite::Tensor *> &inputs) {
   weight_ = new (std::nothrow) hiai::op::Const(name_ + "_w");
   if (weight_ == nullptr) {
     MS_LOG(ERROR) << "New weight const failed.";
     return RET_ERROR;
   }
-  auto weight_shape = inputs[1]->shape();
-  inputs[1]->set_shape({weight_shape[0], weight_shape[3], weight_shape[1], weight_shape[2]});
-  inputs[1]->set_format(schema::Format_NCHW);
-  auto weight_tensor = mindspore::lite::ConverterToNPUTensor(inputs[1]);
+  auto w_shape = inputs[1]->shape();
+  auto nhwc_data = inputs[1]->data_c();
+  auto nchw_data = reinterpret_cast<float *>(malloc(inputs[1]->ElementsNum() * sizeof(float)));
+  if (nchw_data == nullptr) {
+    MS_LOG(ERROR) << "Malloc buffer failed.";
+    return RET_ERROR;
+  }
+  PackNHWCToNCHWFp32(nhwc_data, nchw_data, w_shape[0], w_shape[1] * w_shape[2], w_shape[3]);
+
+  std::shared_ptr<ge::Tensor> weight_tensor = std::shared_ptr<ge::Tensor>(new (std::nothrow) ge::Tensor());
+  if (weight_tensor == nullptr) {
+    MS_LOG(ERROR) << "new weight_tensor failed.";
+    return RET_ERROR;
+  }
+  ge::TensorDesc tensor_desc(lite::ConverterToNPUShape({w_shape[0], w_shape[3], w_shape[1], w_shape[2]}),
+                             ge::FORMAT_NCHW, lite::ConverterToNPUDataType(inputs[1]->data_type()));
+  weight_tensor->SetTensorDesc(tensor_desc);
+  weight_tensor->SetData(reinterpret_cast<const uint8_t *>(nchw_data), inputs[1]->Size());
+
   weight_->set_attr_value(weight_tensor);
+  free(nchw_data);
+  return RET_OK;
+}
 
-  inputs[1]->set_shape(weight_shape);
-  inputs[1]->set_format(schema::Format_NHWC);
-
+int ConvolutionBaseNPUKernel::InitBiasConst(const std::vector<lite::Tensor *> &inputs) {
   if (inputs.size() >= 3) {
     bias_ = new (std::nothrow) hiai::op::Const(name_ + "_b");
     if (bias_ == nullptr) {
@@ -74,7 +91,7 @@ int ConvolutionBaseNPUKernel::SetActivation(const ge::Operator *input, ActType a
   } else if (act_type == ActType_Relu6) {
     act_->set_attr_mode(14);
   } else {
-    MS_LOG(ERROR) << "Unsupport activation for convolution.";
+    MS_LOG(ERROR) << "Unsupport activation type for convolution.";
     return RET_ERROR;
   }
   return RET_OK;

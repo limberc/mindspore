@@ -1,4 +1,4 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
+# Copyright 2020-2021 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 import os
 import stat
 import time
+import json
 from enum import Enum
 
 from mindspore import log as logger, context
@@ -37,7 +38,6 @@ from mindspore.profiler.parser.optime_parser import OPComputeTimeParser
 from mindspore.profiler.parser.step_trace_parser import GpuStepTraceParser, AscendStepTraceParser
 from mindspore.nn.cell import Cell
 
-PROFILING_LOG_BASE_PATH = "/var/log/npu/profiling"
 INIT_OP_NAME = 'Default/InitDataSetQueue'
 
 class ProfileOption(Enum):
@@ -72,7 +72,6 @@ class Profiler:
         >>> profiler.analyse()
     """
 
-    _base_profiling_container_path = "/var/log/npu/profiling/container"
     _hwts_output_filename_target = "output_format_data_hwts_"
     _opcompute_output_filename_target = "output_op_compute_time_"
     _aicpu_op_output_filename_target = "output_data_preprocess_aicpu_"
@@ -80,9 +79,10 @@ class Profiler:
     def __init__(self, **kwargs):
         # get device_id and device_target
         self._get_devid_and_devtarget()
-        output_path = kwargs.pop("output_path", "./data")
+        format_time = int(time.time())
+        output_path = kwargs.pop("output_path", f"data-{format_time}")
         self._output_path = validate_and_normalize_path(output_path)
-        self._output_path = os.path.join(self._output_path, "profiler")
+        self._output_path = os.path.join(self._output_path, f"profiler-{format_time}")
         if not os.path.exists(self._output_path):
             os.makedirs(self._output_path, exist_ok=True)
             os.chmod(self._output_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
@@ -108,24 +108,47 @@ class Profiler:
             optypes_not_deal = kwargs.pop("optypes_not_deal", "Variable")
             if not isinstance(optypes_not_deal, str):
                 raise TypeError("The parameter optypes_not_deal must be str.")
-            job_id = kwargs.pop("ascend_job_id", "")
+            job_dir = kwargs.pop("ascend_job_id", "")
+            if job_dir:
+                job_dir = validate_and_normalize_path(job_dir)
+                if not os.path.exists(job_dir):
+                    msg = f"Invalid ascend_job_id: {job_dir}, Please pass the absolute path of the JOB dir"
+                    logger.error(msg)
+                    raise ValueError(msg)
+                self._output_path, _ = os.path.split(job_dir)
             if kwargs:
                 logger.warning("There are invalid params which don't work.")
 
             os.environ['DEVICE_ID'] = self._dev_id
-            os.environ['AICPU_PROFILING_MODE'] = 'true'
+            fp_point = os.environ.get("PROFILING_FP_START", "")
+            bp_point = os.environ.get("PROFILING_BP_END", "")
 
+            profiling_options = {
+                "result_path": self._output_path,
+                "fp_point": fp_point,
+                "bp_point": bp_point,
+                "training_trace": "on",
+                "task_trace": "on",
+                "ai_core_metrics": "PipeUtilization",
+                "aicpu_trace": "on"
+            }
+
+            profiling_options = json.dumps(profiling_options)
+            # Characters longer than 2048 are ignored, resulting in profiling option resolution errors
+            if len(profiling_options) > 2048:
+                msg = "The parameter length exceeds the limit (2048), please input valid parameters."
+                logger.error(msg)
+                raise ValueError(msg)
             # use context interface to open profiling, for the new mindspore version(after 2020.5.21)
-            context.set_context(enable_profiling=True, profiling_options="training_trace:task_trace")
-
-            self._container_path = os.path.join(self._base_profiling_container_path, self._dev_id)
-            data_path = os.path.join(self._container_path, "data")
+            context.set_context(enable_profiling=True, profiling_options=profiling_options)
+            base_profiling_container_path = os.path.join(self._output_path, "container")
+            container_path = os.path.join(base_profiling_container_path, self._dev_id)
+            data_path = os.path.join(container_path, "data")
             data_path = validate_and_normalize_path(data_path)
             if not os.path.exists(data_path):
                 os.makedirs(data_path, exist_ok=True)
 
             self._filt_optype_names = optypes_not_deal.split(",") if optypes_not_deal else []
-            self._profiling_job_id = job_id
             # add job id env through user input later
             self._job_id_env = 0
             self._start_time = int(time.time() * 10000000)
@@ -174,7 +197,7 @@ class Profiler:
             job_id = self._get_profiling_job_id()
             logger.info("Profiling: job id is %s ", job_id)
 
-            source_path = os.path.join(PROFILING_LOG_BASE_PATH, job_id)
+            source_path = os.path.join(self._output_path, job_id)
             # parse hwts.log.data.45.dev file, and get task profiling data
             hwts_output_filename = self._hwts_output_filename_target + self._dev_id + ".txt"
             hwts_output_filename = os.path.join(self._output_path, hwts_output_filename)
@@ -346,43 +369,36 @@ class Profiler:
         """Get profiling job id, which was generated by ada service.
 
         Returns:
-            str: profiling jon id.
+            str, profiling job id.
         """
 
-        if self._profiling_job_id:
-            return self._profiling_job_id
-
         job_id = ""
-        cmd = "ls -t " + PROFILING_LOG_BASE_PATH + "|grep JOB|awk '{print $1}'"
-        r = os.popen(cmd)
-        profiling_job_dirs = r.readlines()
-        r.close()
-        for item in profiling_job_dirs:
-            path = os.path.join(PROFILING_LOG_BASE_PATH, item.strip())
-            log_file = get_file_names(path, "host_start.log")
-            if not log_file:
-                logger.error("Profiling: job path %s, host_start.log not exist.", path)
-                continue
+        for item in os.listdir(self._output_path):
+            if item.startswith('JOB'):
+                path = os.path.join(self._output_path, item)
 
-            log_file = os.path.join(path, log_file[0])
-            item_dict = self._parse_host_start_log(log_file)
+                log_file = get_file_names(path, "host_start.log")
+                if not log_file:
+                    logger.error("Profiling: job path %s, host_start.log not exist.", path)
+                    break
 
-            if not item_dict:
-                logger.error("Profiling: job path %s, fail to get job start info.", path)
-                continue
+                log_file = os.path.join(path, log_file[0])
+                item_dict = self._parse_host_start_log(log_file)
 
-            if self._dev_id != item_dict["device_id"]:
-                logger.info("Profiling: job path %s, dev id %s, training device id %s.",
-                            path, item_dict["device_id"], self._dev_id)
-                continue
+                if not item_dict:
+                    logger.error("Profiling: job path %s, fail to get job start info.", path)
+                    break
 
-            if self._start_time > int(item_dict["start_time"]):
-                logger.info("Profiling: job path %s, start_time %s, training start_time %d.",
-                            path, item_dict["start_time"], self._start_time)
+                job_id = item
+
+                if self._dev_id != item_dict["device_id"]:
+                    logger.info("Profiling: job path %s, dev id %s, training device id %s.",
+                                path, item_dict["device_id"], self._dev_id)
+
+                if self._start_time > int(item_dict["start_time"]):
+                    logger.info("Profiling: job path %s, start_time %s, training start_time %d.",
+                                path, item_dict["start_time"], self._start_time)
                 break
-
-            job_id = item.strip()
-            break
 
         if not job_id:
             msg = "Fail to get profiling job, please check whether job dir was generated"

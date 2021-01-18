@@ -82,7 +82,6 @@ class SessionBasic : public std::enable_shared_from_this<SessionBasic> {
   void RunOp(OpRunInfo *, const GraphInfo &, std::vector<tensor::TensorPtr> *input_tensors, VectorRef *outputs,
              const std::vector<int64_t> &tensors_mask);
   void RunOpsInGraph(const GraphId &graph_id, const std::vector<tensor::TensorPtr> &inputs, VectorRef *outputs);
-  void CleanUselessTensors(const std::shared_ptr<std::vector<tensor::TensorPtr>> &useless_tensors);
 
   virtual void RegisterSummaryCallBackFunc(const CallBackFunc &callback);
 
@@ -114,6 +113,7 @@ class SessionBasic : public std::enable_shared_from_this<SessionBasic> {
                                                          const std::vector<tensor::TensorPtr> &inputs);
   // Get graph by graph id, if not exist return null ptr
   KernelGraphPtr GetGraph(GraphId graph_id) const;
+  void ClearGraph();
 #ifdef ENABLE_DEBUGGER
   // set debugger
   void SetDebugger() {
@@ -142,7 +142,6 @@ class SessionBasic : public std::enable_shared_from_this<SessionBasic> {
   friend class RunGraphTask;
   friend class RunOpTask;
   friend class RunOpsInGraphTask;
-  friend class CleanUselessTensorsTask;
   virtual bool IsSupportSummary() { return true; }
   virtual void CreateOutputTensors(const GraphId &graph_id, const std::vector<tensor::TensorPtr> &input_tensors,
                                    VectorRef *outputs,
@@ -164,7 +163,6 @@ class SessionBasic : public std::enable_shared_from_this<SessionBasic> {
                          const std::vector<int64_t> &tensors_mask) {}
   virtual void RunOpsInGraphImpl(const GraphId &graph_id, const std::vector<tensor::TensorPtr> &inputs,
                                  VectorRef *outputs) {}
-  void CleanUselessTensorsImpl(const std::shared_ptr<std::vector<tensor::TensorPtr>> &useless_tensors);
   void RunInfer(NotNull<FuncGraphPtr> func_graph, const std::vector<tensor::TensorPtr> &inputs);
 
   virtual void SetSummaryNodes(KernelGraph *graph);
@@ -183,7 +181,7 @@ class SessionBasic : public std::enable_shared_from_this<SessionBasic> {
   // create a single run op graph
   std::shared_ptr<KernelGraph> ConstructSingleOpGraph(const OpRunInfo &op_run_info,
                                                       const std::vector<tensor::TensorPtr> &input_tensors,
-                                                      const std::vector<int64_t> &tensors_mask);
+                                                      const std::vector<int64_t> &tensors_mask, bool is_ascend = false);
   // create a new kernel graph and update the graph sum
   KernelGraphPtr NewKernelGraph();
   std::vector<AnfNodePtr> CreateParameterFromTuple(const AnfNodePtr &node, KernelGraph *graph);
@@ -196,6 +194,8 @@ class SessionBasic : public std::enable_shared_from_this<SessionBasic> {
   AnfNodePtr FindPullNode(const AnfNodePtr &push_node, const std::vector<AnfNodePtr> &node_list);
   void UpdateGraphDynamicShapeAttr(const NotNull<KernelGraphPtr> &root_graph);
   void UpdateAllGraphDynamicShapeAttr(const std::vector<KernelGraphPtr> &all_graphs);
+  void RunOpRemoveNopNode(const KernelGraphPtr &kernel_graph) const;
+  void RunOpHideNopNode(const KernelGraphPtr &kernel_graph) const;
 #if (ENABLE_CPU && (ENABLE_D || ENABLE_GPU))
   void CheckPSModeConsistence(const KernelGraphPtr &kernel_graph) const;
   void GetBatchElements(const AnfNodePtr &kernel_node) const;
@@ -205,6 +205,7 @@ class SessionBasic : public std::enable_shared_from_this<SessionBasic> {
   std::unordered_map<GraphId, std::shared_ptr<KernelGraph>> graphs_;
   std::unordered_map<GraphInfo, std::shared_ptr<KernelGraph>> run_op_graphs_;
   std::unordered_map<FuncGraphPtr, KernelGraphPtr> front_backend_graph_map_;
+  std::unordered_map<GraphId, std::vector<GraphId>> parent_graphs_;
   std::shared_ptr<Context> context_;
   CallBackFunc summary_callback_;
   static GraphId graph_sum_;

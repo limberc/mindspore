@@ -19,15 +19,32 @@
 #include <fstream>
 #include <unordered_set>
 #include <utility>
+
+#include "minddata/dataset/engine/runtime_context.h"
 #include "minddata/dataset/include/samplers.h"
 #include "minddata/dataset/include/transforms.h"
+#include "minddata/dataset/util/path.h"
+#include "minddata/dataset/util/status.h"
+
+#include "minddata/dataset/core/client.h"
+#include "minddata/dataset/engine/consumers/tree_consumer.h"
+
+#include "minddata/dataset/kernels/c_func_op.h"
+#include "minddata/dataset/kernels/tensor_op.h"
 
 #ifndef ENABLE_ANDROID
 #include "minddata/dataset/engine/ir/cache/dataset_cache_impl.h"
 #endif
 
+#ifndef ENABLE_ANDROID
+#include "minddata/dataset/text/sentence_piece_vocab.h"
+#include "minddata/dataset/text/vocab.h"
+#endif
+
 // Sampler headers (in alphabetical order)
 #include "minddata/dataset/engine/datasetops/source/sampler/sampler.h"
+
+#include "minddata/dataset/engine/ir/datasetops/dataset_node.h"
 
 // IR non-leaf nodes
 #include "minddata/dataset/engine/ir/datasetops/batch_node.h"
@@ -57,7 +74,6 @@
 #endif
 
 #include "minddata/dataset/core/config_manager.h"
-#include "minddata/dataset/util/path.h"
 #include "minddata/dataset/util/random.h"
 #include "minddata/dataset/util/services.h"
 
@@ -86,7 +102,7 @@ namespace mindspore {
 namespace dataset {
 
 // Function to create the iterator, which will build and launch the execution tree.
-std::shared_ptr<Iterator> Dataset::CreateIterator(std::vector<std::string> columns) {
+std::shared_ptr<Iterator> Dataset::CreateIterator(std::vector<std::string> columns, int32_t num_epochs) {
   std::shared_ptr<Iterator> iter;
   try {
     auto ds = shared_from_this();
@@ -98,7 +114,7 @@ std::shared_ptr<Iterator> Dataset::CreateIterator(std::vector<std::string> colum
     }
 
     iter = std::make_shared<Iterator>();
-    Status rc = iter->BuildAndLaunchTree(ds);
+    Status rc = iter->BuildAndLaunchTree(ds, num_epochs);
     if (rc.IsError()) {
       MS_LOG(ERROR) << "CreateIterator failed." << rc;
       return nullptr;
@@ -553,7 +569,7 @@ std::shared_ptr<Dataset> Dataset::SetNumWorkers(int32_t num_workers) {
 
 #ifndef ENABLE_ANDROID
 std::shared_ptr<SentencePieceVocab> Dataset::BuildSentencePieceVocab(
-  const std::vector<std::string> &col_names, uint32_t vocab_size, float character_coverage,
+  const std::vector<std::string> &col_names, int32_t vocab_size, float character_coverage,
   SentencePieceModel model_type, const std::unordered_map<std::string, std::string> &params) {
   auto vocab = std::make_shared<SentencePieceVocab>();
   auto ds = std::make_shared<BuildSentenceVocabNode>(IRNode(), vocab, col_names, vocab_size, character_coverage,
@@ -939,6 +955,7 @@ TFRecordDataset::TFRecordDataset(const std::vector<std::string> &dataset_files, 
                                            shard_id, shard_equal_rows, cache);
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
+
 #endif
 }  // namespace dataset
 }  // namespace mindspore

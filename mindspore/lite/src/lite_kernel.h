@@ -56,7 +56,6 @@ enum SubGraphType { kNotSubGraph = 0, kCpuFP32SubGraph, kCpuFP16SubGraph, kGpuSu
 class LiteKernel {
  public:
   LiteKernel() = default;
-  // parameter should be deleted or freed by caller, and should be deleted or freed after LiteKernel is deleted
   LiteKernel(OpParameter *parameter, std::vector<lite::Tensor *> in_tensors, std::vector<lite::Tensor *> out_tensors,
              const lite::InnerContext *ctx, const mindspore::lite::PrimitiveC *primitive)
       : op_parameter_(parameter),
@@ -94,6 +93,8 @@ class LiteKernel {
   virtual void FindInoutKernels(const std::vector<kernel::LiteKernel *> &scope_kernels);
 
   virtual int Init() { return mindspore::lite::RET_ERROR; }
+
+  OpParameter *op_parameter() const { return op_parameter_; }
 
   std::string name() const { return this->name_; }
 
@@ -156,7 +157,7 @@ class LiteKernel {
 
   const std::vector<LiteKernel *> &out_kernels() const { return this->out_kernels_; }
 
-  virtual bool IsReady(const std::vector<lite::Tensor *> &scope_tensors);
+  virtual bool IsReady(const std::vector<lite::Tensor *> &in_tensor);
 
   virtual void InitOutTensorInitRefCount();
 
@@ -212,9 +213,9 @@ typedef LiteKernel *(*KernelCreator)(const std::vector<lite::Tensor *> &inputs,
 
 class LiteKernelUtil {
  public:
-  static std::vector<kernel::LiteKernel *> SubgraphInputKernels(const std::vector<kernel::LiteKernel *> &kernels);
+  static std::vector<kernel::LiteKernel *> SubgraphInputNodes(const std::vector<kernel::LiteKernel *> &kernels);
 
-  static std::vector<kernel::LiteKernel *> SubgraphOutputKernels(const std::vector<kernel::LiteKernel *> &kernels);
+  static std::vector<kernel::LiteKernel *> SubgraphOutputNodes(const std::vector<kernel::LiteKernel *> &kernels);
 
   static std::vector<lite::Tensor *> SubgraphInputTensors(const std::vector<kernel::LiteKernel *> &kernels);
 
@@ -226,6 +227,27 @@ class LiteKernelUtil {
 
   static int SetInput(LiteKernel &kernelMod, const std::vector<lite::Tensor *> &inputs);
 };
+
+template <class T>
+kernel::LiteKernel *LiteKernelCreator(const std::vector<lite::Tensor *> &inputs,
+                                      const std::vector<lite::Tensor *> &outputs, OpParameter *parameter,
+                                      const lite::InnerContext *ctx, const kernel::KernelKey &desc,
+                                      const mindspore::lite::PrimitiveC *primitive) {
+  auto *kernel = new (std::nothrow) T(parameter, inputs, outputs, ctx, primitive);
+  if (kernel == nullptr) {
+    MS_LOG(ERROR) << "kernel: " << parameter->name_ << "is nullptr.";
+    free(parameter);
+    return nullptr;
+  }
+
+  auto ret = kernel->Init();
+  if (ret != lite::RET_OK) {
+    MS_LOG(ERROR) << "Init kernel failed, name: " << parameter->name_;
+    delete kernel;
+    return nullptr;
+  }
+  return kernel;
+}
 }  // namespace mindspore::kernel
 
 #endif  // MINDSPORE_LITE_SRC_LITE_KERNEL_H_

@@ -25,13 +25,14 @@
 #include "frontend/parallel/auto_parallel/rec_core/rec_partition.h"
 #include "frontend/parallel/ops_info/operator_info.h"
 #include "frontend/parallel/strategy.h"
+#include "frontend/parallel/step_parallel.h"
 
 namespace mindspore {
 namespace parallel {
 void GenerateStrategy(const std::shared_ptr<Graph> &graph, const std::vector<std::shared_ptr<OperatorInfo>> &ops,
                       const std::shared_ptr<std::vector<std::vector<size_t>>> &eli_list,
                       const std::vector<std::vector<std::string>> &input_tensor_names,
-                      const std::shared_ptr<std::vector<size_t>> &index_list) {
+                      const std::shared_ptr<std::vector<size_t>> &index_list, bool is_training) {
   MS_EXCEPTION_IF_NULL(graph);
   MS_EXCEPTION_IF_NULL(eli_list);
   MS_EXCEPTION_IF_NULL(index_list);
@@ -43,6 +44,21 @@ void GenerateStrategy(const std::shared_ptr<Graph> &graph, const std::vector<std
   GenerateEliminatedOperatorStrategyForward(graph, ops, input_tensor_names, index_list, no_stra_op_list);
   GenerateEliminatedOperatorStrategyBackward(ops, input_tensor_names, no_stra_op_list);
   GenerateRemainingOperatorStrategy(graph, ops, input_tensor_names, index_list, no_stra_op_list);
+
+  for (auto &op : ops) {
+    // Set user-defined strategy
+    auto attrs = op->attrs();
+    if (StrategyFound(attrs)) {
+      StrategyPtr user_defined_stra = parallel::ExtractStrategy(attrs);
+      op->SetSelectedStrategyAndCost(user_defined_stra, op->selected_cost());
+    }
+    // Set back to raw strategy for special node in predict/eval
+    if (!is_training) {
+      if ((op->is_last_node()) || (op->type() == "_VirtualDataset")) {
+        SetBackToRawStrategy(op);
+      }
+    }
+  }
 }
 
 Strategys PrepareMatMul(const std::shared_ptr<Graph> &graph, const std::vector<std::shared_ptr<OperatorInfo>> &ops,
@@ -361,6 +377,9 @@ Strategys MakeRecSearchStrategy(const std::shared_ptr<Graph> &graph,
   if (iter_ops >= ops.size()) {
     MS_LOG(EXCEPTION) << "Failure: Operators' elements out of range.";
   }
+  if (graph->nodes[iter_graph].apply.op_type == kRecUnsortedSegmentOp) {
+    return MakeDataParallelStrategy(graph, ops, iter_graph, iter_ops);
+  }
 
   StrategyPtr origin_strategy = ops[iter_ops]->strategy();
   Strategys strategies;
@@ -472,6 +491,29 @@ Strategys MakeDataParallelStrategy(const std::shared_ptr<Graph> &graph,
   }
 
   return strategies;
+}
+
+void SetBackToRawStrategy(const std::shared_ptr<OperatorInfo> &op) {
+  StrategyPtr origin_strategy = op->strategy();
+  Strategys strategies;
+
+  for (size_t iter_strategy = 0; iter_strategy < origin_strategy->GetInputDim().size(); iter_strategy++) {
+    Dimensions s;
+    size_t strategy_size = origin_strategy->GetInputDim()[iter_strategy].size();
+    for (size_t dim = 0; dim < strategy_size; dim++) {
+      if (strategy_size >= 1 && strategy_size <= 4) {
+        s.push_back(1);
+      } else if (strategy_size == 0) {
+        s = {};
+      } else {
+        MS_LOG(EXCEPTION) << op->name() << ": Strategy size " << strategy_size << " is unmatched.";
+      }
+    }
+    strategies.push_back(s);
+  }
+
+  StrategyPtr sp = std::make_shared<Strategy>(0, strategies);
+  op->SetSelectedStrategyAndCost(sp, op->selected_cost());
 }
 
 Strategys PrepareStrategy(const std::shared_ptr<Graph> &graph, const std::vector<std::shared_ptr<OperatorInfo>> &ops,

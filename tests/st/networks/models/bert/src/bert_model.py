@@ -25,7 +25,6 @@ from mindspore.ops import operations as P
 from mindspore.ops import composite as C
 from mindspore.common.tensor import Tensor
 from mindspore.common.parameter import Parameter
-from .fused_layer_norm import FusedLayerNorm
 
 
 class BertConfig:
@@ -251,11 +250,7 @@ class BertOutput(nn.Cell):
         self.dropout = nn.Dropout(1 - dropout_prob)
         self.dropout_prob = dropout_prob
         self.add = P.TensorAdd()
-        if compute_type == mstype.float16:
-            self.layernorm = FusedLayerNorm((out_channels,),
-                                            use_batch_norm=enable_fused_layernorm).to_float(compute_type)
-        else:
-            self.layernorm = nn.LayerNorm((out_channels,)).to_float(compute_type)
+        self.layernorm = nn.LayerNorm((out_channels,)).to_float(compute_type)
         self.cast = P.Cast()
 
     def construct(self, hidden_status, input_tensor):
@@ -817,13 +812,13 @@ class CreateAttentionMaskFromInputMask(nn.Cell):
 
         if not self.input_mask_from_dataset:
             self.input_mask = initializer(
-                "ones", [config.batch_size, config.seq_length], mstype.int32).to_tensor()
+                "ones", [config.batch_size, config.seq_length], mstype.int32).init_data()
 
         self.cast = P.Cast()
         self.reshape = P.Reshape()
         self.shape = (config.batch_size, 1, config.seq_length)
         self.broadcast_ones = initializer(
-            "ones", [config.batch_size, config.seq_length, 1], mstype.float32).to_tensor()
+            "ones", [config.batch_size, config.seq_length, 1], mstype.float32).init_data()
         self.batch_matmul = P.BatchMatMul()
 
     def construct(self, input_mask):
@@ -869,7 +864,7 @@ class BertModel(nn.Cell):
 
         if not self.token_type_ids_from_dataset:
             self.token_type_ids = initializer(
-                "zeros", [self.batch_size, self.seq_length], mstype.int32).to_tensor()
+                "zeros", [self.batch_size, self.seq_length], mstype.int32).init_data()
 
         self.bert_embedding_lookup = EmbeddingLookup(
             vocab_size=config.vocab_size,

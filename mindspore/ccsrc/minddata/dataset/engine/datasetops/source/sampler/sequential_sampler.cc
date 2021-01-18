@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <vector>
 
 namespace mindspore {
 namespace dataset {
@@ -63,6 +64,9 @@ Status SequentialSamplerRT::GetNextSample(std::unique_ptr<DataBuffer> *out_buffe
 }
 
 Status SequentialSamplerRT::InitSampler() {
+  if (is_initialized) {
+    return Status::OK();
+  }
   CHECK_FAIL_RETURN_UNEXPECTED(start_index_ >= 0,
                                "Invalid parameter, start_index must be greater than or equal to 0, but got " +
                                  std::to_string(start_index_) + ".\n");
@@ -82,6 +86,8 @@ Status SequentialSamplerRT::InitSampler() {
     num_samples_ > 0 && samples_per_buffer_ > 0,
     "Invalid parameter, samples_per_buffer must be greater than 0, but got " + std::to_string(samples_per_buffer_));
   samples_per_buffer_ = samples_per_buffer_ > num_samples_ ? num_samples_ : samples_per_buffer_;
+
+  is_initialized = true;
   return Status::OK();
 }
 
@@ -97,6 +103,26 @@ Status SequentialSamplerRT::ResetSampler() {
   return Status::OK();
 }
 
+int64_t SequentialSamplerRT::CalculateNumSamples(int64_t num_rows) {
+  // Holds the number of rows available for Sequential sampler. It can be the rows passed from its child sampler or the
+  // num_rows from the dataset
+  int64_t child_num_rows = num_rows;
+  if (!child_.empty()) {
+    child_num_rows = child_[0]->CalculateNumSamples(num_rows);
+  }
+  int64_t num_samples = (num_samples_ > 0) ? std::min(child_num_rows, num_samples_) : child_num_rows;
+  // For this sampler we need to take start_index into account. Because for example in the case we are given n rows
+  // and start_index != 0 and num_samples >= n then we can't return all the n rows.
+  if (child_num_rows - (start_index_ - current_id_) <= 0) {
+    return 0;
+  }
+  if (child_num_rows - (start_index_ - current_id_) < num_samples)
+    num_samples = child_num_rows - (start_index_ - current_id_) > num_samples
+                    ? num_samples
+                    : num_samples - (start_index_ - current_id_);
+  return num_samples;
+}
+
 void SequentialSamplerRT::SamplerPrint(std::ostream &out, bool show_all) const {
   out << "\nSampler: SequentialSampler";
   if (show_all) {
@@ -105,6 +131,24 @@ void SequentialSamplerRT::SamplerPrint(std::ostream &out, bool show_all) const {
     // Then add our own info
     out << "\nStart index: " << start_index_;
   }
+}
+
+Status SequentialSamplerRT::to_json(nlohmann::json *out_json) {
+  nlohmann::json args;
+  args["sampler_name"] = "SequentialSampler";
+  args["start_index"] = start_index_;
+  args["num_samples"] = num_samples_;
+  if (this->HasChildSampler()) {
+    std::vector<nlohmann::json> children_args;
+    for (auto child : child_) {
+      nlohmann::json child_arg;
+      RETURN_IF_NOT_OK(child->to_json(&child_arg));
+      children_args.push_back(child_arg);
+    }
+    args["child_sampler"] = children_args;
+  }
+  *out_json = args;
+  return Status::OK();
 }
 }  // namespace dataset
 }  // namespace mindspore

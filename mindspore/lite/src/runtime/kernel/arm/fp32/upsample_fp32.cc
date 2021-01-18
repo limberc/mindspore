@@ -61,8 +61,8 @@ int UpsampleCPUKernel::ReSize() {
     auto output = out_tensors().at(0);
     MS_ASSERT(output);
     auto output_shape = output->shape();
-    ret = PrepareResizeBilinear(input_shape.data(), output_shape.data(), align_corners_, y_bottoms_, y_tops_, x_lefts_,
-                                x_rights_, y_bottom_weights_, x_left_weights_);
+    ret = PrepareResizeBilinear(input_shape.data(), output_shape.data(), CalculateAsymmetric, y_bottoms_, y_tops_,
+                                x_lefts_, x_rights_, y_bottom_weights_, x_left_weights_);
     if (ret != RET_OK) {
       FreeTmpBuffer();
     }
@@ -104,16 +104,15 @@ int UpsampleCPUKernel::RunImpl(int task_id) {
       int c = in_tensors_.at(0)->shape().at(3);
       float *line0 = line_buffer_ + new_width_ * c * 2 * task_id;
       float *line1 = line0 + new_width_ * c;
-      ret =
-        ResizeBilinear2(input_data, output_data, input_shape.data(), out_tensor->shape().data(), y_bottoms_, y_tops_,
-                        x_lefts_, x_rights_, y_bottom_weights_, x_left_weights_, line0, line1, n_h_begin, n_h_end);
+      ret = ResizeBilinear(input_data, output_data, input_shape.data(), out_tensor->shape().data(), y_bottoms_, y_tops_,
+                           x_lefts_, x_rights_, y_bottom_weights_, x_left_weights_, line0, line1, n_h_begin, n_h_end,
+                           false);
 
       break;
     }
     case static_cast<int>(schema::ResizeMethod_NEAREST): {
-      align_corners_ = false;
       ret = ResizeNearestNeighbor(input_data, output_data, input_shape.data(), out_tensor->shape().data(),
-                                  align_corners_, task_id, context_->thread_num_);
+                                  CalculateAsymmetric, coordinate_transform_mode_, task_id, context_->thread_num_);
       break;
     }
     default: {
@@ -134,28 +133,5 @@ int UpsampleCPUKernel::Run() {
 
   return RET_OK;
 }
-
-kernel::LiteKernel *CpuUpsampleFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                 const std::vector<lite::Tensor *> &outputs, OpParameter *parameter,
-                                                 const lite::InnerContext *ctx, const KernelKey &desc,
-                                                 const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(parameter != nullptr);
-  MS_ASSERT(desc.type == PrimitiveType_Upsample);
-  auto *kernel = new (std::nothrow) UpsampleCPUKernel(parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "Create kernel failed, name: " << parameter->name_;
-    free(parameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << parameter->name_
-                  << ", type: " << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(parameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Upsample, CpuUpsampleFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Upsample, LiteKernelCreator<UpsampleCPUKernel>)
 }  // namespace mindspore::kernel

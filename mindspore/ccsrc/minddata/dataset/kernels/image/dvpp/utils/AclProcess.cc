@@ -14,9 +14,9 @@
  */
 
 #include "AclProcess.h"
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <thread>
-#include <sys/stat.h>
 
 namespace {
 const int BUFFER_SIZE = 2048;
@@ -125,7 +125,7 @@ APP_ERROR AclProcess::InitResource() {
  * @param: imageFile specifies the image path to be processed
  * @return: aclError which is error code of ACL API
  */
-APP_ERROR AclProcess::Preprocess(RawData &ImageInfo) {
+APP_ERROR AclProcess::Preprocess(const RawData &ImageInfo) {
   // Decode process
   APP_ERROR ret = dvppCommon_->CombineJpegdProcess(ImageInfo, PIXEL_FORMAT_YUV_SEMIPLANAR_420, true);
   if (ret != APP_ERR_OK) {
@@ -179,7 +179,7 @@ APP_ERROR AclProcess::Preprocess(RawData &ImageInfo) {
  * @param: imageFile specifies the image path to be processed
  * @return: aclError which is error code of ACL API
  */
-APP_ERROR AclProcess::Process(RawData &ImageInfo) {
+APP_ERROR AclProcess::Process(const RawData &ImageInfo) {
   struct timeval begin = {0};
   struct timeval end = {0};
   gettimeofday(&begin, nullptr);
@@ -217,106 +217,6 @@ APP_ERROR AclProcess::Process(RawData &ImageInfo) {
     return ret;
   }
   return APP_ERR_OK;
-}
-
-/*
- * @description: Rename the image for saving
- * @Param: primary name of image
- * @return: aclError which is error code of ACL API
- */
-APP_ERROR AclProcess::RenameFile(std::string &filename) {
-  std::string delimiter = "/";
-  size_t pos = 0;
-  std::string token;
-  while ((pos = filename.find(delimiter)) != std::string::npos) {
-    token = filename.substr(0, pos);
-    filename.erase(0, pos + delimiter.length());
-  }
-  delimiter = ".";
-  pos = filename.find(delimiter);
-  filename = filename.substr(0, pos);
-  if (filename.length() == 0) {
-    return APP_ERR_COMM_WRITE_FAIL;
-  }
-  return APP_ERR_OK;
-}
-
-/*
- * @description: Write result image to file
- * @param: resultSize specifies the size of the result image
- * @param: outBuf specifies the memory on the host to save the result image
- * @return: aclError which is error code of ACL API
- */
-APP_ERROR AclProcess::WriteResult(uint32_t resultSize, std::shared_ptr<void> outBuf, std::string filename) {
-  std::string resultPathName = "result";
-  // Create result directory when it does not exist
-  if (access(resultPathName.c_str(), 0) != 0) {
-    int ret = mkdir(resultPathName.c_str(), S_IRUSR | S_IWUSR | S_IXUSR);  // for linux
-    if (ret != 0) {
-      MS_LOG(ERROR) << "Failed to create result directory: " << resultPathName << ", ret = " << ret;
-      return ret;
-    }
-  }
-  APP_ERROR ret = RenameFile(filename);
-  if (ret != 0) {
-    MS_LOG(ERROR) << "Failed to rename file: " << resultPathName << ", ret = " << ret;
-    return ret;
-  }
-  resultPathName = resultPathName + "/" + filename + ".bin";
-  SetFileDefaultUmask();
-  FILE *fp = fopen(resultPathName.c_str(), "wb");
-  if (fp == nullptr) {
-    MS_LOG(ERROR) << "Failed to open file";
-    return APP_ERR_COMM_OPEN_FAIL;
-  }
-  uint32_t result = fwrite(outBuf.get(), 1, resultSize, fp);
-  if (result != resultSize) {
-    MS_LOG(ERROR) << "Failed to write file";
-    return APP_ERR_COMM_WRITE_FAIL;
-  }
-  MS_LOG(INFO) << "Write result to file successfully";
-  // After write info onto desk, release the memory on device
-  dvppCommon_->ReleaseDvppBuffer();
-  uint32_t ff = fflush(fp);
-  if (ff != 0) {
-    MS_LOG(ERROR) << "Failed to fflush file";
-    return APP_ERR_COMM_DESTORY_FAIL;
-  }
-  uint32_t fc = fclose(fp);
-  if (fc != 0) {
-    MS_LOG(ERROR) << "Failed to fclose file";
-    return APP_ERR_COMM_DESTORY_FAIL;
-  }
-  return APP_ERR_OK;
-}
-
-void AclProcess::YUV420TOYUV444(unsigned char *inputBuffer, unsigned char *outputBuffer, int w, int h) {
-  unsigned char *srcY = nullptr, *srcU = nullptr, *srcV = nullptr;
-  unsigned char *desY = nullptr, *desU = nullptr, *desV = nullptr;
-  srcY = inputBuffer;  // Y
-  if (srcY == nullptr) std::cout << "Failure pointer transfer!";
-  srcU = srcY + w * h;  // U
-  srcV = srcU + w * h / 4;
-  ;  // V
-
-  desY = outputBuffer;
-  desU = desY + w * h;
-  desV = desU + w * h;
-  memcpy(desY, srcY, w * h * sizeof(unsigned char));
-  for (int i = 0; i < h; i += 2) {    //行
-    for (int j = 0; j < w; j += 2) {  //列
-      // U
-      desU[i * w + j] = srcU[i / 2 * w / 2 + j / 2];
-      desU[i * w + j + 1] = srcU[i / 2 * w / 2 + j / 2];
-      desU[(i + 1) * w + j] = srcU[i / 2 * w / 2 + j / 2];
-      desU[(i + 1) * w + j + 1] = srcU[i / 2 * w / 2 + j / 2];
-      // V
-      desV[i * w + j] = srcV[i / 2 * w / 2 + j / 2];
-      desV[i * w + j + 1] = srcV[i / 2 * w / 2 + j / 2];
-      desV[(i + 1) * w + j] = srcV[i / 2 * w / 2 + j / 2];
-      desV[(i + 1) * w + j + 1] = srcV[i / 2 * w / 2 + j / 2];
-    }
-  }
 }
 
 void AclProcess::CropConfigFilter(CropRoiConfig &cfg, DvppCropInputInfo &cropinfo) {

@@ -244,7 +244,7 @@ table Conv2DGradFilter {
     dilateW: int;
     dilateH: int;
     hasBias: bool = false;  // DEPRECATED
-    filter_shape: [int];
+    filter_shape: [int];  // DEPRECATED
     activationType: ActivationType = 0;
 }
 
@@ -265,7 +265,7 @@ table Conv2DGradInput {
     dilateW: int;
     dilateH: int;
     hasBias: bool = false;  // DEPRECATED
-    input_shape: [int];
+    input_shape: [int];  // DEPRECATED
     activationType: ActivationType = 0;
 }
 
@@ -1005,6 +1005,11 @@ table OneHot {
 
 table Lstm{
     bidirection: bool = false;
+    smooth: float = 0.0;
+}
+
+table Gru{
+    bidirection: bool = false;
 }
 
 table PriorBox {
@@ -1149,6 +1154,9 @@ table While {
     bodySubgraphIndex : int;
 }
 
+table If {
+}
+
 table UnsortedSegmentSum {
     numSegments : int;
 }
@@ -1232,4 +1240,18 @@ table Merge {
 
 table GeLU {
     approximate : bool = false;
+}
+
+table NonZero {
+}
+
+table InvertPermutation {
+}
+
+table Size {
+}
+
+table RandomStandardNormal {
+    seed : int;
+    seed2 : int;
 }

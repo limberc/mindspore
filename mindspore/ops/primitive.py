@@ -19,6 +19,7 @@ import copy
 from mindspore.common.api import _wrap_func
 from mindspore import context
 from .._c_expression import Primitive_, real_run_op, prim_type
+from .._checkparam import Validator
 from . import signature as sig
 
 
@@ -205,6 +206,17 @@ class Primitive(Primitive_):
     def update_parameter(self):
         """ Whether the primitive will update the value of parameter."""
         return self._update_parameter
+
+    def recompute(self, mode):
+        """
+        Set the primitive recomputed. If a primitive feeds into a grad node and is set recomputed,
+        we will compute it again for the grad node after the forward computation.
+        Args:
+            mode (bool): Specifies whether the primitive is recomputed. Default: True.
+        """
+        Validator.check_bool(mode)
+        self.add_prim_attr("recompute", mode)
+        return self
 
 
 class PrimitiveWithCheck(Primitive):
@@ -480,7 +492,7 @@ def constexpr(fn=None, get_instance=True, name=None):
         ...     return len(x)
         >>> assert tuple_len(a) == 2
         ...
-        >>> # make a operator class to calculate tuple len
+        >>> # make an operator class to calculate tuple len
         >>> @constexpr(get_instance=False, name="TupleLen")
         >>> def tuple_len_class(x):
         ...     return len(x)
@@ -510,8 +522,4 @@ def constexpr(fn=None, get_instance=True, name=None):
 def _run_op(obj, op_name, args):
     """Single op execution function supported by ge in PyNative mode."""
     output = real_run_op(obj, op_name, args)
-    if not output:
-        raise RuntimeError("Pynative run op %s failed!" % op_name)
-    if len(output) == 1:
-        output = output[0]
     return output

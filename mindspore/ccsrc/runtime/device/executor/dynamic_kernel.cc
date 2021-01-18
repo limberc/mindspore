@@ -23,6 +23,7 @@
 #include "common/trans.h"
 #include "pipeline/jit/static_analysis/static_analysis.h"
 #include "abstract/dshape.h"
+#include "utils/utils.h"
 #include "abstract/param_validator.h"
 
 namespace mindspore {

@@ -57,6 +57,7 @@ void ManifestNode::Print(std::ostream &out) const {
 }
 
 Status ManifestNode::ValidateParams() {
+  RETURN_IF_NOT_OK(DatasetNode::ValidateParams());
   std::vector<char> forbidden_symbols = {':', '*', '?', '"', '<', '>', '|', '`', '&', '\'', ';'};
   for (char c : dataset_file_) {
     auto p = std::find(forbidden_symbols.begin(), forbidden_symbols.end(), c);
@@ -81,7 +82,7 @@ Status ManifestNode::ValidateParams() {
   return Status::OK();
 }
 
-Status ManifestNode::Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) {
+Status ManifestNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) {
   // Do internal Schema generation.
   auto schema = std::make_unique<DataSchema>();
   RETURN_IF_NOT_OK(schema->AddColumn(ColDescriptor("image", DataType(DataType::DE_UINT8), TensorImpl::kCv, 1)));

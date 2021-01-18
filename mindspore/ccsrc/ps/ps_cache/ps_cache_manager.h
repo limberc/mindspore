@@ -40,6 +40,7 @@ namespace mindspore {
 namespace ps {
 constexpr size_t kHostCacheScaleFactor = 10;
 constexpr size_t kMaxThreadNum = 16;
+constexpr size_t kMinIdsPerThread = 10000;
 using mindspore::kernel::Address;
 
 struct HashTableInfo {
@@ -48,7 +49,7 @@ struct HashTableInfo {
   size_t embedding_size{0};
   size_t vocab_size{0};
   Address device_address{nullptr, 0};
-  std::shared_ptr<int[]> host_address{nullptr};
+  std::shared_ptr<float[]> host_address{nullptr};
   ParamInitInfo param_init_info_;
 };
 
@@ -127,6 +128,7 @@ class PsCacheManager {
   bool initialized_ps_cache() const { return initialized_ps_cache_; }
   void DoProcessData(uint32_t device_id, void *context);
   void IncreaseGraphStep(const std::string &channel_name);
+  void SyncEmbeddingTable();
   void Finalize();
   void DumpHashTables(bool dump_device_tables = false) const;
 
@@ -149,7 +151,7 @@ class PsCacheManager {
   bool WaitGraphRun();
   bool ParseDeviceData(size_t id, bool *need_swap_device_to_host, bool *need_swap_host_to_device, int *hash_index);
   bool ParseHostDataHostToDevice(size_t id);
-  bool ParseHostDataDeviceToHost(size_t id);
+  bool ParseHostDataDeviceToHost();
   bool HashSwapDeviceOut(int *swap_out_index, ::ps::SArray<float> *swap_out_data, const HashTableInfo &hash_info);
   bool HashSwapDeviceIn(int *swap_in_ids, int *swap_in_index, const HashTableInfo &hash_info, size_t key);
   bool HashSwapHostToDevice(const HashTableInfo &hash_info);
@@ -166,7 +168,11 @@ class PsCacheManager {
   bool CheckFinishInsertInitInfo() const;
   void AddEmbeddingTable() const;
   void DumpStatisticsInfo(size_t each_print_step = 1000);
-
+  bool SyncHostEmbeddingTable();
+  bool SyncDeviceEmbeddingTable();
+  bool CheckIDInDeviceTask(const int *batch_ids, const size_t batch_ids_len, int *hash_index, bool *in_device,
+                           size_t *hash_hit_count);
+  bool CheckIDInDevice(const int *batch_ids, const size_t batch_ids_len, int *hash_index, bool *in_device);
   bool initialized_ps_cache_{false};
   std::string channel_name_;
   std::mutex channel_mutex_;
@@ -191,6 +197,7 @@ class PsCacheManager {
   std::atomic_bool finish_insert_init_info_{false};
   std::atomic_bool finish_init_parameter_server_{false};
   std::atomic_bool running_{false};
+  bool finish_embedding_table_sync_{false};
 };
 
 static PsCacheManager &ps_cache_instance = PsCacheManager::GetInstance();

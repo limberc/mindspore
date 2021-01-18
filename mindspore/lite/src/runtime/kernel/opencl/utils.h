@@ -25,8 +25,6 @@
 #include "nnacl/op_base.h"
 #include "src/lite_kernel.h"
 #include "src/common/utils.h"
-#include "src/runtime/opencl/opencl_runtime.h"
-#include "src/runtime/kernel/opencl/opencl_kernel.h"
 
 namespace mindspore::lite {
 kernel::LiteKernel *GetOpenCLKernel(const std::vector<Tensor *> &in_tensors, const std::vector<Tensor *> &out_tensors,
@@ -59,29 +57,25 @@ std::string CLErrorCode(cl_int error_code);
 
 int WriteToBin(const std::string &file_path, void *data, size_t size);
 
-void PrintTensor(const lite::Tensor *tensor, lite::opencl::MemType mem_type, int n = 10,
-                 const std::string &out_file = "");
-
-void PrintKernelOutput(OpenCLKernel *kernel, int n = 10, const std::string &out_file = "");
-
 std::vector<int> GetNHWCShape(const std::vector<int> &tensor_shape);
 
 std::vector<size_t> GetImage2dShapeFromNHWC(const std::vector<int> &tensor_shape, schema::Format format);
 
 template <class T1, class T2>
-void PackNCHWToNC4HW4(void *src, void *dst, int batch, int plane, int channel, const std::function<T2(T1)> &to_dtype) {
+void PackNCHWToNC4HW4(void *src, void *dst, int batch, int plane_in, int plane_out, int channel,
+                      const std::function<T2(T1)> &to_dtype) {
   MS_ASSERT(src);
   MS_ASSERT(dst);
   int c4 = UP_DIV(channel, C4NUM);
   for (int b = 0; b < batch; b++) {
-    int src_offset = b * plane * channel;
-    int dst_offset = b * plane * c4 * C4NUM;
+    int src_offset = b * plane_in * channel;
+    int dst_offset = b * plane_out * c4;
     for (int c = 0; c < channel; c++) {
       int c4_block_num = c / C4NUM;
       int c4_block_rem = c % C4NUM;
-      int src_c_offset = src_offset + c * plane;
-      int dst_c_offset = dst_offset + c4_block_num * plane * C4NUM;
-      for (int k = 0; k < plane; k++) {
+      int src_c_offset = src_offset + c * plane_in;
+      int dst_c_offset = dst_offset + c4_block_num * plane_out;
+      for (int k = 0; k < plane_in; k++) {
         int src_kernel_offset = src_c_offset + k;
         int dst_kernel_offset = dst_c_offset + C4NUM * k + c4_block_rem;
         (static_cast<T2 *>(dst) + dst_kernel_offset)[0] = to_dtype((static_cast<T1 *>(src) + src_kernel_offset)[0]);
@@ -152,38 +146,6 @@ std::vector<T> MatrixMultiply(const T A[], const T B[], int M, int N, int K) {
     }
   }
   return C;
-}
-
-template <typename SRC_T, typename DST_T>
-void ConvertConvWeight4DTo7D(void *src, void *dst, size_t CO, size_t KH, size_t KW, size_t CI, size_t OGroup = 1,
-                             const size_t CI_TILE = 4, const size_t CO_TILE = 4) {
-  MS_ASSERT(src);
-  MS_ASSERT(dst);
-  MS_ASSERT(CI_TILE);
-  MS_ASSERT(CO_TILE);
-  MS_ASSERT(OGroup);
-  if (CO_TILE == 0 || CI_TILE == 0) return;
-  auto origin_weight = reinterpret_cast<SRC_T *>(src);
-  auto packed_weight = reinterpret_cast<DST_T *>(dst);
-  auto CI_SLICES = UP_DIV(CI, CI_TILE);
-  for (size_t co = 0, src_idx = 0; co < CO; ++co) {
-    for (size_t kh = 0; kh < KH; ++kh) {
-      for (size_t kw = 0; kw < KW; ++kw) {
-        for (size_t ci = 0; ci < CI; ++ci) {
-          size_t co_outer = co / (CO_TILE * OGroup);
-          size_t group_idx = co % (CO_TILE * OGroup) / CO_TILE;
-          size_t co_inner = co % CO_TILE;
-          size_t ci_outer = ci / CI_TILE;
-          size_t ci_inner = ci % CI_TILE;
-          size_t dst_idx =
-            (((((co_outer * KH + kh) * KW + kw) * CI_SLICES + ci_outer) * OGroup + group_idx) * CI_TILE + ci_inner) *
-              CO_TILE +
-            co_inner;
-          packed_weight[dst_idx] = static_cast<DST_T>(origin_weight[src_idx++]);
-        }
-      }
-    }
-  }
 }
 
 }  // namespace mindspore::kernel

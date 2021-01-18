@@ -48,15 +48,13 @@ STATUS TFExpandDimsParser::Parse(const tensorflow::NodeDef &tf_op,
     return RET_ERROR;
   }
   tensorflow::AttrValue attr_value;
-  if (!TensorFlowUtils::FindAttrValue(*axis_node, "value", &attr_value)) {
-    MS_LOG(ERROR) << "The value attr should be specified";
-    return RET_ERROR;
-  }
-  auto tensor_proto = attr_value.tensor();
-  if (tensor_proto.int_val_size() > 0) {
-    attr->dim = tensor_proto.int_val(0);
-  } else {
-    attr->dim = (reinterpret_cast<const int32_t *>(tensor_proto.tensor_content().data()))[0];
+  if (TensorFlowUtils::FindAttrValue(*axis_node, "value", &attr_value)) {
+    const auto &tensor_proto = attr_value.tensor();
+    if (tensor_proto.int_val_size() > 0) {
+      attr->dim = tensor_proto.int_val(0);
+    } else {
+      attr->dim = (reinterpret_cast<const int32_t *>(tensor_proto.tensor_content().data()))[0];
+    }
   }
 
   primitive->value.type = schema::PrimitiveType_ExpandDims;

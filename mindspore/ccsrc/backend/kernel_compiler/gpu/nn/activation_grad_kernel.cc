@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2020 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,21 +18,6 @@
 
 namespace mindspore {
 namespace kernel {
-MS_REG_GPU_KERNEL_ONE(
-  ReluGrad,
-  KernelAttr().AddInputAttr(kNumberTypeFloat32).AddInputAttr(kNumberTypeFloat32).AddOutputAttr(kNumberTypeFloat32),
-  ActivationGradGpuKernel, float)
-MS_REG_GPU_KERNEL_ONE(
-  ReluGrad,
-  KernelAttr().AddInputAttr(kNumberTypeFloat16).AddInputAttr(kNumberTypeFloat16).AddOutputAttr(kNumberTypeFloat16),
-  ActivationGradGpuKernel, half)
-MS_REG_GPU_KERNEL_ONE(
-  ReluGrad, KernelAttr().AddInputAttr(kNumberTypeInt32).AddInputAttr(kNumberTypeInt32).AddOutputAttr(kNumberTypeInt32),
-  ActivationGradGpuKernel, int32_t)
-MS_REG_GPU_KERNEL_ONE(
-  ReluGrad, KernelAttr().AddInputAttr(kNumberTypeInt8).AddInputAttr(kNumberTypeInt8).AddOutputAttr(kNumberTypeInt8),
-  ActivationGradGpuKernel, int8_t)
-
 MS_REG_GPU_KERNEL_ONE(
   ReLU6Grad,
   KernelAttr().AddInputAttr(kNumberTypeFloat32).AddInputAttr(kNumberTypeFloat32).AddOutputAttr(kNumberTypeFloat32),

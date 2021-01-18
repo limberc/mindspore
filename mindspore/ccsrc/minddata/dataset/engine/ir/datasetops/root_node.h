@@ -52,7 +52,7 @@ class RootNode : public DatasetNode {
   /// \brief a base class override function to create the required runtime dataset op objects for this class
   /// \param node_ops - A vector containing shared pointer to the Dataset Ops that this object will create
   /// \return Status Status::OK() if build successfully
-  Status Build(std::vector<std::shared_ptr<DatasetOp>> *node_ops) override;
+  Status Build(std::vector<std::shared_ptr<DatasetOp>> *const node_ops) override;
 
   /// \brief Getter of number of epochs
   int32_t num_epochs() { return num_epochs_; }
@@ -68,13 +68,13 @@ class RootNode : public DatasetNode {
   /// \param[in] p The node to visit
   /// \param[out] modified Indicator if the node was modified
   /// \return Status of the node visit
-  Status Accept(IRNodePass *p, bool *modified) override;
+  Status Accept(IRNodePass *const p, bool *const modified) override;
 
   /// \brief Base-class override for accepting IRNodePass visitor
   /// \param[in] p The node to visit
   /// \param[out] modified Indicator if the node was modified
   /// \return Status of the node visit
-  Status AcceptAfter(IRNodePass *p, bool *modified) override;
+  Status AcceptAfter(IRNodePass *const p, bool *const modified) override;
 
  private:
   int32_t num_epochs_;

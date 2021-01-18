@@ -14,6 +14,7 @@
 # ============================================================================
 
 """Define the grad rules of neural network related operations."""
+import os
 import numpy as np
 from mindspore.ops import _selected_grad_ops as SG
 from mindspore.ops.primitive import constexpr
@@ -28,6 +29,7 @@ from ..operations import _grad_ops as G
 from ..operations import _inner_ops as inner
 from ... import context
 
+env_force_bprop_seq = os.getenv("ENV_FORCE_BPROP_SEQ")
 
 @bprop_getters.register(P.BiasAdd)
 def get_bprop_bias_add(self):
@@ -55,6 +57,8 @@ def get_bprop_conv2d(self):
 
     def bprop(x, w, out, dout):
         dx = input_grad(dout, w, get_shape(x))
+        if env_force_bprop_seq == '1':
+            x = F.depend(x, dx)
         dw = filter_grad(dout, x, get_shape(w))
         return dx, dw
 
@@ -173,6 +177,8 @@ def get_bprop_depthwise_conv2d_native(self):
 
     def bprop(x, w, out, dout):
         dx = input_grad(get_shape(x), w, dout)
+        if env_force_bprop_seq == '1':
+            x = F.depend(x, dx)
         dw = filter_grad(x, get_shape(w), dout)
         return dx, dw
 
@@ -422,6 +428,18 @@ def get_bprop_relu(self):
     return bprop
 
 
+@bprop_getters.register(G.ReluGrad)
+def get_bprop_relu_grad(self):
+    """Grad definition for `ReLUGrad` operation."""
+    input_grad = G.ReluGrad()
+
+    def bprop(grad, y, out, dout):
+        dgrad = input_grad(dout, y)
+        return dgrad, zeros_like(y)
+
+    return bprop
+
+
 @bprop_getters.register(P.ReLU6)
 def get_bprop_relu6(self):
     """Grad definition for `ReLU6` operation."""
@@ -501,11 +519,22 @@ def get_bprop_sigmoid_grad(self):
     sigmoid_grad = G.SigmoidGrad()
 
     def bprop(y, grad, out, dout):
-        ddy = dout * grad * (1. - 2 * y)
-        d2x = sigmoid_grad(y, dout)
-        return (ddy, d2x)
+        dy = dout * grad * (1. - 2 * y)
+        dgrad = sigmoid_grad(y, dout)
+        return dy, dgrad
 
     return bprop
+
+
+@constexpr
+def _get_transpose_axis(x_shp, axis):
+    rank = len(x_shp)
+    if axis < 0:
+        axis += rank
+    reverse_axis = [i for i in range(rank)]
+    reverse_axis[axis] = rank - 1
+    reverse_axis[rank - 1] = axis
+    return tuple(reverse_axis)
 
 
 @bprop_getters.register(P.Softmax)
@@ -514,10 +543,23 @@ def get_bprop_softmax(self):
     sum_func = P.ReduceSum(keep_dims=True)
     sub = P.Sub()
     mul = P.Mul()
+    get_shape = P.Shape()
+    transpose = P.Transpose()
     axis = self.axis
+    if not isinstance(axis, int):
+        axis = axis[0]
 
     def bprop(x, out, dout):
-        dx = mul(out, sub(dout, sum_func(mul(out, dout), axis)))
+        # dx = (dout - sum(dout * out)) * out
+        # This formula is correct only when the `axis` is the last dimension.
+        # In order to support the scenario where the `axis` is other values,
+        # we transpose the data of the `axis` dimension to the last dimension for calculation,
+        # and then transpose it back after the calculation.
+        reverse_axis = _get_transpose_axis(get_shape(x), axis)
+        out = transpose(out, reverse_axis)
+        dout = transpose(dout, reverse_axis)
+        dx = mul(out, sub(dout, sum_func(mul(out, dout), -1)))
+        dx = transpose(dx, reverse_axis)
         return (dx,)
 
     return bprop
@@ -570,6 +612,19 @@ def get_bprop_tanh(self):
     def bprop(x, out, dout):
         dx = tanh_grad(out, dout)
         return (dx,)
+
+    return bprop
+
+
+@bprop_getters.register(G.TanhGrad)
+def get_bprop_tanh_grad(self):
+    """Grad definition for `TanhGrad` operation."""
+    tanh_grad = G.TanhGrad()
+
+    def bprop(y, grad, out, dout):
+        dy = dout * -2.0 * grad * y
+        dgrad = tanh_grad(y, dout)
+        return dy, dgrad
 
     return bprop
 
@@ -635,6 +690,24 @@ def get_bprop_fused_batch_norm_ex(self):
         dscale = out[1]
         dbias = out[2]
         return dx, dscale, dbias, zeros_like(mean), zeros_like(variance)
+
+    return bprop
+
+
+@bprop_getters.register(P.InstanceNorm)
+def get_bprop_instance_norm(self):
+    """Grad definition for `InstanceNorm` operation."""
+    is_training = self.is_training
+    input_grad = G.InstanceNormGrad(is_training, self.epsilon, self.momentum)
+
+    def bprop(x, gamma, beta, mean, variance, out, dout):
+        saved_mean = out[1]
+        saved_variance = out[2]
+        out = input_grad(dout[0], x, gamma, saved_mean, saved_variance)
+        dx = out[0]
+        dgamma = out[1]
+        dbeta = out[2]
+        return dx, dgamma, dbeta, zeros_like(mean), zeros_like(variance)
 
     return bprop
 
@@ -708,6 +781,20 @@ def get_bprop_softmax_cross_entropy_with_logits(self):
         grad = out[1]
         grad = grad * expand(dout[0], -1)
         return grad, zeros_like(labels)
+
+    return bprop
+
+
+@bprop_getters.register(P.NLLLoss)
+def get_bprop_nll_loss(self):
+    """Grad definition for `NLLLoss` operation."""
+    nll_loss_grad = G.NLLLossGrad(reduction=self.reduction)
+
+    def bprop(x, target, weight, out, dout):
+        total_weight = out[1]
+        dout_x = dout[0]
+        dx = nll_loss_grad(x, dout_x, target, weight, total_weight)
+        return dx, zeros_like(target), zeros_like(weight)
 
     return bprop
 
@@ -932,7 +1019,7 @@ def get_bprop_dynamic_rnn(self):
 def get_bprop_dynamic_gru_v2(self):
     """Grad definition for `DynamicGRUV2` operation."""
     dynamic_gru_v2_grad = G.DynamicGRUV2Grad(self.direction, self.cell_depth, self.keep_prob, self.cell_clip,
-                                             self.num_proj, self.time_major, 'double_bias', self.gate_order,
+                                             self.num_proj, self.time_major, self.gate_order,
                                              self.reset_after)
 
     def bprop(x, winput, whidden, binput, bhidden, seq, init_h, out, dout):
@@ -1023,6 +1110,8 @@ def get_bprop_conv2d_backprop_input(self):
 
     def bprop(x, w, f_sizes, out, dout):
         dx = input_grad(dout, w)
+        if env_force_bprop_seq == '1':
+            x = F.depend(x, dx)
         dw = filter_grad(x, dout, F.shape(w))
         return dx, dw, zeros_like(f_sizes)
 

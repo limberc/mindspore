@@ -32,7 +32,9 @@ parser.add_argument("--device_target", type=str, choices=["Ascend", "GPU", "CPU"
                     help="device target")
 args = parser.parse_args()
 
-context.set_context(mode=context.GRAPH_MODE, device_target=args.device_target, device_id=args.device_id)
+context.set_context(mode=context.GRAPH_MODE, device_target=args.device_target)
+if args.device_target == "Ascend":
+    context.set_context(device_id=args.device_id)
 
 if __name__ == "__main__":
     network = YOLOV3DarkNet53(is_training=False)
@@ -45,6 +47,5 @@ if __name__ == "__main__":
 
     shape = [args.batch_size, 3] + config.test_img_shape
     input_data = Tensor(np.zeros(shape), ms.float32)
-    input_shape = Tensor(tuple(config.test_img_shape), ms.float32)
 
-    export(network, input_data, input_shape, file_name=args.file_name, file_format=args.file_format)
+    export(network, input_data, file_name=args.file_name, file_format=args.file_format)

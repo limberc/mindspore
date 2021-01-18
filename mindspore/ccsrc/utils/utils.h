@@ -30,6 +30,9 @@
 
 namespace mindspore {
 // op name. Op which not exists in operator/ops.h, so define it's name here
+constexpr auto kUniqueOpName = "Unique";
+constexpr auto kComputeAccidentalHitsOpName = "ComputeAccidentalHits";
+constexpr auto kCTCGreedyDecoderOpName = "CTCGreedyDecoder";
 constexpr auto kFour2FiveOpName = "Four2Five";
 constexpr auto kFive2FourOpName = "Five2Four";
 constexpr auto kConv2DOpName = "Conv2D";
@@ -44,6 +47,7 @@ constexpr auto kBNGrad1OpName = "BNGrad1";
 constexpr auto kBNGrad2OpName = "BNGrad2";
 constexpr auto kBNGrad3OpName = "BNGrad3";
 constexpr auto kFusedBatchNormEx = "FusedBatchNormEx";
+constexpr auto kInstanceNorm = "InstanceNorm";
 constexpr auto kFusedBatchNormExWithActivation = "FusedBatchNormExWithActivation";
 constexpr auto kFusedBatchNormExWithAddAndActivation = "FusedBatchNormExWithAddAndActivation";
 constexpr auto kFusedBatchNormGradEx = "FusedBatchNormGradEx";
@@ -203,6 +207,7 @@ constexpr auto kPushOpName = "Push";
 constexpr auto kPullOpName = "Pull";
 constexpr auto kEmbeddingLookupOpName = "EmbeddingLookup";
 constexpr auto kEmbeddingLookupProxyOpName = "EmbeddingLookupProxy";
+constexpr auto kGatherV2OpName = "GatherV2";
 constexpr auto kPaddingOpName = "Padding";
 constexpr auto kAvgPoolOpName = "AvgPool";
 constexpr auto kAvgPoolGradGpuOpName = "AvgPoolGradGpu";
@@ -260,6 +265,8 @@ constexpr auto kDropoutOpName = "Dropout";
 constexpr auto kDropoutGradOpName = "DropoutGrad";
 constexpr auto kDropoutGenMaskOpName = "DropoutGenMask";
 constexpr auto kDropoutDoMaskOpName = "DropoutDoMask";
+constexpr auto kSubAndFilterOpName = "SubAndFilter";
+constexpr auto kPadAndShiftOpName = "PadAndShift";
 constexpr auto kSparseSoftmaxCrossEntropyWithLogitsOpName = "SparseSoftmaxCrossEntropyWithLogits";
 constexpr auto kOneHotOpName = "OneHot";
 constexpr auto kSoftmaxCrossEntropyWithLogitsOpName = "SoftmaxCrossEntropyWithLogits";
@@ -312,6 +319,7 @@ constexpr auto kAttrOutputUsedNum = "output_used_num";
 constexpr auto kAttrHasBias = "has_bias";
 constexpr auto kAttrN = "n";
 constexpr auto kAttrLabelForInsertStreamActive = "label_for_insert_stream_active";
+constexpr auto kAttrFpBpEnd = "fpbp_end";
 constexpr auto kAttrFusion = "fusion";
 constexpr auto kAttrGroup = "group";
 constexpr auto kAttrOp = "op";
@@ -478,6 +486,14 @@ const std::set<std::string> kHWSpecialFormatSet = {
   kOpFormat_NC1HWC0_C04,  kOpFormat_FRACTAL_Z_C04, kOpFormat_FRACTAL_ZN_LSTM, kOpFormat_NDC1HWC0, kOpFormat_FRAC_Z};
 
 const std::set<TypeId> kFloatDataTypeSet = {kNumberTypeFloat16, kNumberTypeFloat32};
+
+const std::set<std::string> kComputeDepend = {kUniqueOpName, kComputeAccidentalHitsOpName, kSubAndFilterOpName,
+                                              kPadAndShiftOpName, kCTCGreedyDecoderOpName};
+
+const std::set<std::string> k3DFormatSet = {kOpFormat_NCDHW, kOpFormat_NDC1HWC0, kOpFormat_FRACTAL_Z_3D};
+
+const std::set<std::string> DynamicShapeConstInputToAttr = {
+  kCastOpName, kExpandDimsOpName, kReshapeOpName, kEmbeddingLookupOpName, kTransposeOpName, kReduceSumOpName};
 
 static inline void ChangeFileMode(const std::string &file_name, mode_t mode) {
   try {

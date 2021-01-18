@@ -28,6 +28,9 @@ PKSamplerRT::PKSamplerRT(int64_t num_samples, int64_t val, bool shuffle, int64_t
       samples_per_class_(val) {}
 
 Status PKSamplerRT::InitSampler() {
+  if (is_initialized) {
+    return Status::OK();
+  }
   labels_.reserve(label_to_ids_.size());
   for (const auto &pair : label_to_ids_) {
     if (!pair.second.empty()) {
@@ -58,6 +61,7 @@ Status PKSamplerRT::InitSampler() {
   CHECK_FAIL_RETURN_UNEXPECTED(
     num_samples_ > 0, "Invalid parameter, num_class or K (num samples per class) must be greater than 0, but got " +
                         std::to_string(num_samples_));
+  is_initialized = true;
   return Status::OK();
 }
 
@@ -123,6 +127,25 @@ void PKSamplerRT::SamplerPrint(std::ostream &out, bool show_all) const {
     SamplerRT::SamplerPrint(out, show_all);
     // Then add our own info if any
   }
+}
+
+Status PKSamplerRT::to_json(nlohmann::json *out_json) {
+  nlohmann::json args;
+  args["sampler_name"] = "PKSampler";
+  args["num_val"] = samples_per_class_;
+  args["shuffle"] = shuffle_;
+  args["num_samples"] = num_samples_;
+  if (this->HasChildSampler()) {
+    std::vector<nlohmann::json> children_args;
+    for (auto child : child_) {
+      nlohmann::json child_arg;
+      RETURN_IF_NOT_OK(child->to_json(&child_arg));
+      children_args.push_back(child_arg);
+    }
+    args["child_sampler"] = children_args;
+  }
+  *out_json = args;
+  return Status::OK();
 }
 }  // namespace dataset
 }  // namespace mindspore

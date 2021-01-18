@@ -18,7 +18,7 @@
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
 #include "src/runtime/runtime_api.h"
-#include "nnacl/quantization/quantize.h"
+#include "mindspore/lite/nnacl/int8/quantize.h"
 #include "nnacl/pack.h"
 #include "include/errorcode.h"
 
@@ -315,6 +315,7 @@ int ReduceInt8CPUKernel::CalculateQuantArgs() {
 int ReduceInt8CPUKernel::MallocTmpBuffer() {
   data_buffers_.clear();
   MS_ASSERT(static_cast<int>(buffer_sizes_.size()) == num_axes_ - 1);
+  // malloc num_axes_-1 buffers, since reduce on last axis will generate result to out_tensor, no need for buffer.
   for (auto buffer_size : buffer_sizes_) {
     int32_t *buffer = reinterpret_cast<int32_t *>(context_->allocator->Malloc(buffer_size * sizeof(int32_t)));
     if (buffer == nullptr) {
@@ -488,7 +489,7 @@ int ReduceInt8CPUKernel::Run() {
     begin_src_data_[i] = static_cast<int32_t>(input_data[i]);
   }
   src_data_ = begin_src_data_;
-  for (size_t i = 0; i < data_buffers_.size() - 1; ++i) {
+  for (size_t i = 0; i < data_buffers_.size(); ++i) {
     GetQuantArgs(i);
     dst_data_ = data_buffers_[i];
     outer_size_ = outer_sizes_[i];
@@ -531,24 +532,5 @@ int ReduceInt8CPUKernel::CallReduceUnit(int task_id) {
   return ret;
 }
 
-kernel::LiteKernel *CpuReduceInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                               const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                               const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                               const mindspore::lite::PrimitiveC *primitive) {
-  auto *kernel = new (std::nothrow) ReduceInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "Reduce new ReduceCPUKernel failed.";
-    free(opParameter);
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Reduce, CpuReduceInt8KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Reduce, LiteKernelCreator<ReduceInt8CPUKernel>)
 }  // namespace mindspore::kernel
